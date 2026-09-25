@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust Gate Overseas — Design Direction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#0F1B2D;
+  --navy-800:#1B2B45;
+  --navy-600:#33415C;
+  --slate:#5A6780;
+  --line:#DFDCD2;
+  --vellum:#F2EFE7;
+  --paper:#FDFDFC;
+  --gold:#B98B2E;
+  --gold-ink:#8A6518;
+  --gold-tint:#F4EAD3;
+  --teal:#1E6B63;
+  --teal-tint:#E2EFEC;
+  --ochre:#A8410F;
+  --ochre-tint:#FBEBE2;
+  --r:10px;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--paper);color:var(--navy);
+  font:400 16px/1.6 Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:Newsreader,Georgia,serif;font-weight:400;letter-spacing:-.02em;margin:0}
+.wrap{max-width:1120px;margin:0 auto;padding:0 28px}
+.mono{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+
+/* ---------- masthead ---------- */
+.masthead{background:var(--navy);color:#fff;padding:64px 0 0;position:relative;overflow:hidden}
+.masthead::after{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.16;
+  background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.5) 1px,transparent 0);
+  background-size:22px 22px;
+  -webkit-mask-image:linear-gradient(180deg,#000,transparent 70%);
+  mask-image:linear-gradient(180deg,#000,transparent 70%);
+}
+.masthead .wrap{position:relative;z-index:1}
+.masthead .mono{color:var(--gold)}
+.masthead h1{font-size:clamp(38px,6vw,68px);line-height:1.02;margin:18px 0 14px;max-width:16ch}
+.masthead h1 em{font-style:normal;color:var(--gold)}
+.masthead p{color:#B9C2D2;max-width:56ch;font-size:17px;margin:0 0 40px}
+.mrz{
+  font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:rgba(255,255,255,.42);
+  border-top:1px solid rgba(255,255,255,.14);padding:14px 0;white-space:nowrap;overflow:hidden;
+}
+
+/* ---------- sections ---------- */
+section{padding:76px 0;border-bottom:1px solid var(--line)}
+section.band{background:var(--vellum)}
+.eyebrow{display:flex;align-items:center;gap:12px;color:var(--gold-ink);margin-bottom:14px}
+.eyebrow::after{content:"";height:1px;flex:1;background:var(--line)}
+h2{font-size:clamp(27px,3.4vw,38px);margin-bottom:12px}
+.lede{color:var(--slate);max-width:64ch;margin:0 0 40px;font-size:16.5px}
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:860px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+/* ---------- palette ---------- */
+.sw{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:#fff}
+.sw .chip{height:96px}
+.sw .meta{padding:12px 14px}
+.sw .name{font-weight:600;font-size:14px}
+.sw .hex{font-family:var(--mono);font-size:11.5px;color:var(--slate);margin-top:2px}
+.sw .use{font-size:12.5px;color:var(--slate);margin-top:7px;line-height:1.45}
+
+/* ---------- type ---------- */
+.typerow{border:1px solid var(--line);border-radius:var(--r);padding:26px;background:#fff;margin-bottom:14px}
+.typerow .tag{display:flex;justify-content:space-between;gap:16px;margin-bottom:16px;color:var(--slate)}
+.spec{font-family:var(--mono);font-size:11px;color:var(--slate);letter-spacing:.06em}
+
+/* ---------- components ---------- */
+.btn{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:8px;padding:11px 20px;
+  font:600 14.5px Inter,sans-serif;cursor:pointer;text-decoration:none}
+.btn-gold{background:var(--gold);color:var(--navy)}
+.btn-navy{background:var(--navy);color:#fff}
+.btn-ghost{background:transparent;color:var(--navy);box-shadow:inset 0 0 0 1px var(--line)}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:500}
+.p-ok{background:var(--teal-tint);color:var(--teal)}
+.p-wait{background:var(--gold-tint);color:var(--gold-ink)}
+.p-act{background:var(--ochre-tint);color:var(--ochre)}
+.p-idle{background:#EFEFEC;color:var(--slate)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+
+/* ---------- screens ---------- */
+.screen{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff;
+  box-shadow:0 1px 2px rgba(15,27,45,.04),0 18px 44px -26px rgba(15,27,45,.28)}
+.screen-cap{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin:0 0 14px}
+.screen-cap h3{font-size:20px}
+.screen-cap span{color:var(--slate);font-size:13.5px;text-align:right;max-width:46ch}
+.screen + .screen-cap{margin-top:54px}
+
+.hero{background:var(--navy);color:#fff;padding:0}
+.hero-nav{display:flex;align-items:center;justify-content:space-between;padding:16px 26px;
+  border-bottom:1px solid rgba(255,255,255,.1)}
+.logo{font-family:Newsreader,serif;font-size:17px;letter-spacing:.02em}
+.logo b{color:var(--gold);font-weight:400}
+.hero-nav nav{display:flex;gap:22px;font-size:13.5px;color:#B9C2D2}
+.hero-body{display:grid;grid-template-columns:1.15fr .85fr;gap:34px;padding:44px 26px 30px}
+@media(max-width:860px){.hero-body{grid-template-columns:1fr}}
+.hero-body h3{font-size:clamp(30px,4vw,44px);line-height:1.06;color:#fff}
+.hero-body h3 em{font-style:normal;color:var(--gold)}
+.hero-body p{color:#B9C2D2;font-size:15px;max-width:44ch}
+.trust{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:26px;padding-top:20px;
+  border-top:1px solid rgba(255,255,255,.1);font-size:12.5px;color:#9FAABD}
+.trust b{color:#fff;font-weight:500}
+
+.tracker{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:18px}
+.tracker-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.tracker-head .mono{color:rgba(255,255,255,.5);font-size:10px}
+.tracker-ref{font-family:var(--mono);font-size:13px;color:#fff;letter-spacing:.1em;margin-bottom:16px}
+.bar{height:3px;background:rgba(255,255,255,.14);border-radius:2px;overflow:hidden;margin-bottom:18px}
+.bar i{display:block;height:100%;width:70%;background:var(--gold)}
+.step{display:flex;gap:11px;align-items:flex-start;padding:7px 0;font-size:13.5px;color:#DDE3EC}
+.step .n{font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.4);width:16px;padding-top:3px}
+.step.done .m{color:var(--teal);font-weight:600}
+.step.now{color:#fff}
+.step .m{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:rgba(255,255,255,.45)}
+
+.mrz-strip{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:rgba(255,255,255,.3);
+  padding:11px 26px;border-top:1px solid rgba(255,255,255,.1);white-space:nowrap;overflow:hidden}
+
+/* portal */
+.portal-top{display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-bottom:1px solid var(--line)}
+.portal-top h4{margin:0;font:600 15px Inter,sans-serif}
+.case{background:var(--vellum);border-bottom:1px solid var(--line);padding:16px 22px;
+  display:flex;flex-wrap:wrap;gap:26px;align-items:center}
+.case dl{margin:0}
+.case dt{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--slate)}
+.case dd{margin:3px 0 0;font-size:14px;font-weight:500}
+.case dd.ref{font-family:var(--mono);letter-spacing:.08em}
+.doclist{padding:6px 22px 20px}
+.doc{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.doc:last-child{border-bottom:0}
+.doc .ic{width:32px;height:32px;border-radius:7px;background:var(--vellum);display:grid;place-items:center;
+  font-family:var(--mono);font-size:10px;color:var(--slate);flex:none}
+.doc .nm{font-size:14.5px;font-weight:500}
+.doc .sub{font-family:var(--mono);font-size:10.5px;color:var(--slate);letter-spacing:.06em;margin-top:2px}
+.doc .right{margin-left:auto}
+
+/* admin */
+.admin{display:grid;grid-template-columns:186px 1fr}
+@media(max-width:860px){.admin{grid-template-columns:1fr}}
+.rail{background:var(--navy);color:#93A0B5;padding:18px 0;font-size:13.5px}
+.rail .logo{padding:0 18px 18px;color:#fff;font-size:15px}
+.rail a{display:block;padding:8px 18px;color:inherit;text-decoration:none}
+.rail a.on{color:#fff;background:rgba(185,139,46,.16);box-shadow:inset 2px 0 0 var(--gold)}
+.admin-main{padding:20px 22px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 22px}
+@media(max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{border:1px solid var(--line);border-radius:var(--r);padding:13px 14px}
+.kpi .k{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--slate)}
+.kpi .v{font-family:Newsreader,serif;font-size:28px;margin-top:4px;line-height:1}
+.kpi .d{font-family:var(--mono);font-size:10.5px;color:var(--teal);margin-top:3px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--slate);font-weight:500;padding:9px 10px;border-bottom:1px solid var(--line)}
+td{padding:12px 10px;border-bottom:1px solid var(--line)}
+td.ref{font-family:var(--mono);font-size:12px;letter-spacing:.05em;color:var(--navy-600)}
+tbody tr:last-child td{border-bottom:0}
+
+/* rationale */
+.note{border-left:2px solid var(--gold);padding:2px 0 2px 18px;margin:0 0 20px;max-width:70ch}
+.note h4{margin:0 0 5px;font:600 14.5px Inter,sans-serif}
+.note p{margin:0;color:var(--slate);font-size:14.5px}
+ol.plan{max-width:70ch;padding-left:0;list-style:none;counter-reset:s;margin:0}
+ol.plan li{counter-increment:s;padding:16px 0 16px 46px;border-bottom:1px solid var(--line);position:relative}
+ol.plan li::before{content:counter(s,decimal-leading-zero);position:absolute;left:0;top:18px;
+  font-family:var(--mono);font-size:11px;color:var(--gold-ink);letter-spacing:.1em}
+ol.plan b{display:block;margin-bottom:3px;font-weight:600}
+ol.plan span{color:var(--slate);font-size:14.5px}
+footer{padding:44px 0 60px;color:var(--slate);font-size:13.5px}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="mono">Design direction · v1 · 23 Aug 2026</div>
+    <h1>A visa file you can <em>watch move</em>.</h1>
+    <p>A direction for Trust Gate Overseas built on one idea: in a market crowded with agents who go quiet after taking a deposit, the product that shows its work wins. Navy and antique gold, as briefed — refined toward the vernacular of the document itself.</p>
+    <div class="mrz">P&lt;GBRTRUSTGATE&lt;&lt;OVERSEAS&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;</div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow mono">The brief, restated</div>
+    <h2>Who this is for</h2>
+    <p class="lede">Families and professionals in Punjab and the UK applying for Schengen, UK, Canada, Australia and US visitor visas. They are not shopping for the cheapest agent — they are trying to work out who is real. The site's one job is to convert that suspicion into a started application.</p>
+
+    <div class="note">
+      <h4>The design consequence</h4>
+      <p>Every screen should answer "how do I know?" before it answers "how much?". Proof is the layout, not a testimonial slider bolted to the bottom.</p>
+    </div>
+    <div class="note">
+      <h4>Where the reference mockup is strong</h4>
+      <p>The headline split ("The trip is yours. The paperwork is ours."), the live application-progress card in the hero, and the navy/gold restraint. All kept.</p>
+    </div>
+    <div class="note">
+      <h4>Where it's weak — and what changes</h4>
+      <p>Status colour is undifferentiated, so "Approved" and "Action required" carry the same visual weight. Country cards read as a stock-photo grid with no information on them. Type is one neutral sans doing every job, so data and prose look identical. All three are fixed below.</p>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="eyebrow mono">01 · Colour</div>
+    <h2>Six values, three jobs</h2>
+    <p class="lede">Brand (navy, gold), surface (vellum, paper), and status (teal, ochre). Status colours are deliberately <em>not</em> brand colours — an approval should never be mistakable for a button.</p>
+    <div class="grid g3">
+      <div class="sw"><div class="chip" style="background:#0F1B2D"></div><div class="meta"><div class="name">Passport Navy</div><div class="hex">#0F1B2D</div><div class="use">Ground. Hero, admin rail, footer. Warmer and deeper than your current #0a0e1c — reads as cover board, not as a dark-mode UI.</div></div></div>
+      <div class="sw"><div class="chip" style="background:#B98B2E"></div><div class="meta"><div class="name">Seal Gold</div><div class="hex">#B98B2E</div><div class="use">The only call-to-action colour on the site. Buttons pair it with navy text, never white — that's what keeps it premium rather than amber.</div></div></div>
+      <div class="sw"><div class="chip" style="background:#8A6518"></div><div class="meta"><div class="name">Gold Ink</div><div class="hex">#8A6518</div><div class="use">Gold for <em>text</em>. Seal Gold fails contrast at small sizes on white; this is the accessible sibling for eyebrows and links.</div></div></div>
+      <div class="sw"><div class="chip" style="background:#F2EFE7"></div><div class="meta"><div class="name">Vellum</div><div class="hex">#F2EFE7</div><div class="use">Section banding and case-file headers. Used in strips, never as the whole page background.</div></div></div>
+      <div class="sw"><div class="chip" style="background:#1E6B63"></div><div class="meta"><div class="name">Stamp Teal</div><div class="hex">#1E6B63</div><div class="use">Verified · Approved · Submitted. The one addition to your palette, and the risk I'm taking — see the note below.</div></div></div>
+      <div class="sw"><div class="chip" style="background:#A8410F"></div><div class="meta"><div class="name">Action Ochre</div><div class="hex">#A8410F</div><div class="use">Action required · Rejected. Never used decoratively, so its appearance always means something.</div></div></div>
+    </div>
+
+    <div class="note" style="margin-top:34px">
+      <h4>The one risk, and why I'd take it</h4>
+      <p>Adding a third hue to a navy/gold system is normally a mistake. Here it's load-bearing: this product's entire promise is status legibility, and status needs a colour that isn't already spoken for by the brand. Teal is the ink of an approval stamp, so it's borrowed from the subject rather than invented. If you'd rather stay strictly two-colour, say so and I'll carry status on iconography and weight instead — it will be quieter and slightly harder to scan.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow mono">02 · Typography</div>
+    <h2>Three faces, one each</h2>
+    <p class="lede">Your repo currently loads Inter, Fraunces and JetBrains Mono. I'd keep Inter, swap Fraunces, and repurpose the mono into an actual role instead of an unused import.</p>
+
+    <div class="typerow">
+      <div class="tag"><span class="spec">DISPLAY · NEWSREADER 300–400</span><span class="spec">headlines only · tracking −0.02em</span></div>
+      <div style="font-family:Newsreader,serif;font-size:clamp(30px,4.6vw,52px);line-height:1.04;letter-spacing:-.02em">The trip is yours.<br>The paperwork is <span style="color:#B98B2E">ours.</span></div>
+      <p style="color:var(--slate);font-size:14px;margin:18px 0 0;max-width:62ch">Newsreader over Fraunces: Fraunces' soft, wobbling axis reads friendly-startup. Newsreader has optical sizing and a quieter, editorial cut — closer to a broadsheet travel page and to the officialdom of the documents themselves. Used at large sizes only, never below 24px.</p>
+    </div>
+
+    <div class="typerow">
+      <div class="tag"><span class="spec">BODY & UI · INTER 400–600</span><span class="spec">15–17px · forms, prose, navigation</span></div>
+      <div style="font-size:17px;max-width:60ch">Visitor and tourist visa support for UK and India residents. A named case manager reviews every file, and you can see exactly where yours sits at any hour.</div>
+      <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+        <button class="btn btn-gold">Check eligibility</button>
+        <button class="btn btn-navy">Book a consultation</button>
+        <button class="btn btn-ghost">View all destinations</button>
+      </div>
+      <p style="color:var(--slate);font-size:14px;margin:18px 0 0;max-width:62ch">Kept. Inter is the right call for a product with this many forms and tables, and it's already tuned in your build.</p>
+    </div>
+
+    <div class="typerow">
+      <div class="tag"><span class="spec">DATA · IBM PLEX MONO 400–500</span><span class="spec">refs, dates, statuses, eyebrows</span></div>
+      <div style="font-family:var(--mono);font-size:15px;letter-spacing:.06em;line-height:2">
+        #TG-2026-045 &nbsp;·&nbsp; SCHENGEN / FRANCE &nbsp;·&nbsp; FILED 12 AUG 2026<br>
+        <span style="color:var(--teal)">DOCUMENTS VERIFIED</span> &nbsp;·&nbsp; <span style="color:var(--gold-ink)">DECISION AWAITING</span> &nbsp;·&nbsp; <span style="color:var(--ochre)">ACTION REQUIRED</span>
+      </div>
+      <p style="color:var(--slate);font-size:14px;margin:18px 0 0;max-width:62ch">This is the change that does the most work. Every reference number, date and status in the product renders in mono — so a glance tells you whether you're reading <em>writing</em> or reading <em>record</em>. IBM Plex Mono over JetBrains Mono for its civic, institutional register.</p>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="eyebrow mono">03 · Status system</div>
+    <h2>Four states, everywhere, identical</h2>
+    <p class="lede">The same four pills appear in the hero, the client portal and the admin tables. One vocabulary across the whole product means a client and a case manager are looking at the same word for the same thing.</p>
+    <div class="grid g4">
+      <div class="sw" style="padding:20px 16px"><span class="pill p-ok"><i class="dot"></i>Verified</span><div class="use" style="margin-top:11px;font-size:12.5px;color:var(--slate)">Checked by a case manager. Nothing for the client to do.</div></div>
+      <div class="sw" style="padding:20px 16px"><span class="pill p-wait"><i class="dot"></i>Under review</span><div class="use" style="margin-top:11px;font-size:12.5px;color:var(--slate)">With us. Waiting on our side, not theirs.</div></div>
+      <div class="sw" style="padding:20px 16px"><span class="pill p-act"><i class="dot"></i>Action required</span><div class="use" style="margin-top:11px;font-size:12.5px;color:var(--slate)">Blocked on the client. Always paired with what to do next.</div></div>
+      <div class="sw" style="padding:20px 16px"><span class="pill p-idle"><i class="dot"></i>Not started</span><div class="use" style="margin-top:11px;font-size:12.5px;color:var(--slate)">Neutral by design — an empty step shouldn't feel like a failure.</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow mono">04 · Screens</div>
+    <h2>How it holds together</h2>
+    <p class="lede">Three screens, one from each area, showing the same system carrying public marketing, the client portal and the admin panel.</p>
+
+    <div class="screen-cap">
+      <h3>Public — homepage hero</h3>
+      <span>The progress card is the thesis: proof of a working process, above the fold, before any claim is made.</span>
+    </div>
+    <div class="screen hero">
+      <div class="hero-nav">
+        <div class="logo">TRUST GATE <b>OVERSEAS</b></div>
+        <nav><span>Destinations</span><span>Services</span><span>Updates</span><span>About</span><span>Contact</span></nav>
+      </div>
+      <div class="hero-body">
+        <div>
+          <h3>The trip is yours.<br>The paperwork is <em>ours.</em></h3>
+          <p style="margin-top:16px">Visitor and tourist visa consultancy for UK and India residents. One named case manager, from first call to decision.</p>
+          <div style="display:flex;gap:10px;margin-top:24px;flex-wrap:wrap">
+            <span class="btn btn-gold">Check eligibility</span>
+            <span class="btn" style="background:transparent;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.24)">Book a consultation</span>
+          </div>
+          <div class="trust">
+            <span><b>Offices</b> Jalandhar &amp; London</span>
+            <span><b>Case tracking</b> live, in portal</span>
+            <span><b>Refusal support</b> included</span>
+          </div>
+        </div>
+        <div class="tracker">
+          <div class="tracker-head">
+            <span class="mono">Your application</span>
+            <span class="pill p-wait"><i class="dot"></i>70%</span>
+          </div>
+          <div class="tracker-ref">#TG-2026-045 · SCHENGEN</div>
+          <div class="bar"><i></i></div>
+          <div class="step done"><span class="n">01</span>Consultation<span class="m">Done</span></div>
+          <div class="step done"><span class="n">02</span>Documents verified<span class="m">Done</span></div>
+          <div class="step done"><span class="n">03</span>Application submitted<span class="m">Done</span></div>
+          <div class="step now"><span class="n">04</span>Decision awaiting<span class="m" style="color:var(--gold)">Now</span></div>
+        </div>
+      </div>
+      <div class="mrz-strip">TGO&lt;&lt;2026&lt;&lt;045&lt;&lt;SCHENGEN&lt;&lt;FRA&lt;&lt;FILED12AUG26&lt;&lt;DECISION&lt;PENDING&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;</div>
+    </div>
+
+    <div class="screen-cap">
+      <h3>Client portal — documents</h3>
+      <span>The vellum case-file band carries the same reference and status the client saw on the homepage. Continuity is the trust mechanism.</span>
+    </div>
+    <div class="screen">
+      <div class="portal-top">
+        <h4>Documents</h4>
+        <span class="btn btn-gold" style="padding:8px 15px;font-size:13.5px">Upload document</span>
+      </div>
+      <div class="case">
+        <dl><dt>Application</dt><dd class="ref">#TG-2026-045</dd></dl>
+        <dl><dt>Destination</dt><dd>Schengen · France</dd></dl>
+        <dl><dt>Case manager</dt><dd>Neha S.</dd></dl>
+        <dl><dt>Status</dt><dd><span class="pill p-wait"><i class="dot"></i>Decision awaiting</span></dd></dl>
+      </div>
+      <div class="doclist">
+        <div class="doc"><div class="ic">ID</div><div><div class="nm">Passport</div><div class="sub">UPLOADED 12 AUG 2026</div></div><span class="right pill p-ok"><i class="dot"></i>Verified</span></div>
+        <div class="doc"><div class="ic">FIN</div><div><div class="nm">Bank statement — last 6 months</div><div class="sub">PAGES 4–6 UNREADABLE · RE-UPLOAD</div></div><span class="right pill p-act"><i class="dot"></i>Action required</span></div>
+        <div class="doc"><div class="ic">EMP</div><div><div class="nm">Employment letter</div><div class="sub">UPLOADED 12 AUG 2026</div></div><span class="right pill p-wait"><i class="dot"></i>Under review</span></div>
+        <div class="doc"><div class="ic">TRV</div><div><div class="nm">Travel insurance</div><div class="sub">NOT UPLOADED</div></div><span class="right pill p-idle"><i class="dot"></i>Not started</span></div>
+      </div>
+    </div>
+
+    <div class="screen-cap">
+      <h3>Admin — applications</h3>
+      <span>Same pills, same mono references. A case manager reading a row sees the exact words the client sees in their portal.</span>
+    </div>
+    <div class="screen">
+      <div class="admin">
+        <div class="rail">
+          <div class="logo">TRUST GATE</div>
+          <a>Overview</a><a>Leads</a><a class="on">Applications</a><a>Documents</a><a>Appointments</a><a>Payments</a><a>Settings</a>
+        </div>
+        <div class="admin-main">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <h3 style="font-size:21px">Applications</h3>
+            <span class="btn btn-ghost" style="padding:7px 14px;font-size:13px">Export</span>
+          </div>
+          <div class="kpis">
+            <div class="kpi"><div class="k">Open</div><div class="v">128</div><div class="d">+12 this week</div></div>
+            <div class="kpi"><div class="k">Awaiting client</div><div class="v">18</div><div class="d" style="color:var(--ochre)">6 over 7 days</div></div>
+            <div class="kpi"><div class="k">Submitted</div><div class="v">42</div><div class="d">+8 this week</div></div>
+            <div class="kpi"><div class="k">Approved · 30d</div><div class="v">37</div><div class="d">88% rate</div></div>
+          </div>
+          <table>
+            <thead><tr><th>Reference</th><th>Client</th><th>Destination</th><th>Status</th><th>Updated</th></tr></thead>
+            <tbody>
+              <tr><td class="ref">#TG-2026-045</td><td>Tushar M.</td><td>Schengen · France</td><td><span class="pill p-wait"><i class="dot"></i>Decision awaiting</span></td><td class="ref">12 AUG</td></tr>
+              <tr><td class="ref">#TG-2026-044</td><td>Rahul M.</td><td>United Kingdom</td><td><span class="pill p-act"><i class="dot"></i>Action required</span></td><td class="ref">11 AUG</td></tr>
+              <tr><td class="ref">#TG-2026-043</td><td>Sarah K.</td><td>Canada</td><td><span class="pill p-ok"><i class="dot"></i>Approved</span></td><td class="ref">09 AUG</td></tr>
+              <tr><td class="ref">#TG-2026-042</td><td>Amit S.</td><td>Australia</td><td><span class="pill p-idle"><i class="dot"></i>Not started</span></td><td class="ref">07 AUG</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="eyebrow mono">05 · Build order</div>
+    <h2>What I'd do, in sequence</h2>
+    <p class="lede">Roughly the order I'd work in if you approve this direction. Each step leaves the app in a working state.</p>
+    <ol class="plan">
+      <li><b>Reconnect the tokens</b><span>Rewrite <code>globals.css</code> so <code>--primary</code>, <code>--accent</code> and friends resolve to the navy/gold system instead of the bright blue and amber currently overriding it. Add teal and ochre as status tokens. This alone re-skins every existing page.</span></li>
+      <li><b>Type roles</b><span>Swap Fraunces for Newsreader, JetBrains Mono for IBM Plex Mono, and add a <code>.font-data</code> utility. Apply mono to every reference, date and status across all 40 pages.</span></li>
+      <li><b>Status primitive</b><span>One <code>&lt;StatusPill&gt;</code> component with the four states, replacing the ad-hoc badges. Used by portal, admin and public alike.</span></li>
+      <li><b>Public site, 15 pages</b><span>Homepage first (hero + tracker + destinations), then destinations, service detail, eligibility flow, updates, blog, about, FAQ, contact, legal.</span></li>
+      <li><b>Client portal, 7 pages</b><span>Case-file band, documents, messages, appointments, payments, profile.</span></li>
+      <li><b>Admin panel, 15 pages</b><span>Rail, KPI row, table system, then each management screen onto the shared table and dialog primitives.</span></li>
+      <li><b>Quality floor</b><span>Mobile down to 360px, visible keyboard focus rings, <code>prefers-reduced-motion</code> respected, and contrast checked on every gold-on-light pairing.</span></li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p style="margin:0 0 6px"><b style="color:var(--navy)">Before you approve:</b> tell me if the teal status colour stays or goes, and whether Newsreader is a yes — those two decisions set everything downstream.</p>
+    <p style="margin:0">Colours, type and layout in this document are design proposals, not verified brand assets. Copy shown is placeholder written to demonstrate tone; the reference numbers, names and dates are invented for illustration.</p>
+  </div>
+</footer>
+
+</body>
+</html>

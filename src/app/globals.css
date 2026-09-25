@@ -1,0 +1,650 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   TRUST GATE OVERSEAS — DESIGN TOKENS
+   Palette: Passport Navy #0F1B2D · Seal Gold #B98B2E
+   Status:  Stamp Teal #1E6B63 · Action Ochre #A8410F
+   All values are HSL triplets so Tailwind can apply opacity.
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* --- surface --- */
+    --background: 43 38% 97%; /* Ivory  #FAF8F2 — the page, not navy */
+    --foreground: 216 50% 12%; /* Passport Navy   #0F1B2D */
+
+    --card: 0 0% 100%;   /* cards lift off the ivory by being pure white */
+    --card-foreground: 216 50% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 216 50% 12%;
+
+    /* --- brand --- */
+    /* Primary is the navy. It is the ground, not a button colour. */
+    --primary: 216 50% 12%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Accent is Seal Gold — the ONLY call-to-action colour on the site.
+       It pairs with navy text, never white. That is what keeps it
+       reading as antique gold rather than as a warning amber. */
+    --accent: 40 60% 45%; /* Seal Gold  #B98B2E */
+    --accent-foreground: 216 50% 12%;
+
+    /* Gold Ink — the accessible sibling for gold *text* at small sizes.
+       Seal Gold on white is ~4.0:1 and fails AA below 18px. */
+    --accent-ink: 40 70% 32%; /* Gold Ink   #8A6518 */
+
+    /* --- neutrals --- */
+    --secondary: 42 32% 94%; /* Vellum  #F3F0E8 — banding on ivory */
+    --secondary-foreground: 216 50% 12%;
+
+    --muted: 44 30% 93%;
+    --muted-foreground: 220 17% 43%; /* Slate      #5A6780 */
+
+    --border: 46 17% 85%; /* Line       #DFDCD2 */
+    --input: 46 17% 85%;
+    --ring: 40 60% 45%;
+
+    /* --- status ---
+       Deliberately outside the brand palette: an approval must never be
+       mistakable for a button. See design direction, section 03. */
+    --success: 174 56% 27%; /* Stamp Teal    #1E6B63 */
+    --success-foreground: 0 0% 100%;
+    --success-tint: 174 30% 92%;
+
+    --warning: 40 60% 45%; /* Seal Gold — "with us, waiting" */
+    --warning-foreground: 216 50% 12%;
+    --warning-tint: 42 55% 90%;
+
+    --destructive: 20 84% 36%; /* Action Ochre  #A8410F */
+    --destructive-foreground: 0 0% 100%;
+    --destructive-tint: 22 60% 94%;
+
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 216 50% 8%;
+    --foreground: 44 30% 93%;
+
+    --card: 216 44% 11%;
+    --card-foreground: 44 30% 93%;
+
+    --popover: 216 44% 11%;
+    --popover-foreground: 44 30% 93%;
+
+    --primary: 44 30% 93%;
+    --primary-foreground: 216 50% 12%;
+
+    --accent: 40 62% 55%;
+    --accent-foreground: 216 50% 12%;
+    --accent-ink: 40 62% 62%;
+
+    --secondary: 216 34% 16%;
+    --secondary-foreground: 44 30% 93%;
+
+    --muted: 216 34% 15%;
+    --muted-foreground: 218 18% 66%;
+
+    --border: 216 30% 20%;
+    --input: 216 30% 20%;
+    --ring: 40 62% 55%;
+
+    --success: 174 44% 45%;
+    --success-foreground: 216 50% 8%;
+    --success-tint: 174 30% 18%;
+
+    --warning: 40 62% 55%;
+    --warning-foreground: 216 50% 8%;
+    --warning-tint: 42 40% 18%;
+
+    --destructive: 20 70% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-tint: 22 40% 18%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+
+    /* READABILITY BASELINE
+       ------------------------------------------------------------
+       16px/1.5 is Tailwind's default and it is tight for a site people
+       read carefully — this audience is checking whether they can trust
+       you, which means actually reading the words.
+
+       17px with 1.65 leading is the comfortable figure for extended
+       reading on screen. `calt` and `kern` stay on; `liga` is left at
+       its default so Inter's numerals behave in tables. */
+    font-size: 17px;
+    line-height: 1.65;
+    font-feature-settings: "kern" 1, "calt" 1;
+    letter-spacing: -0.003em;
+  }
+
+  @media (max-width: 639px) {
+    body {
+      /* Slightly smaller on a phone, because the measure is narrower and
+         17px produces too few words per line. */
+      font-size: 16px;
+      line-height: 1.6;
+    }
+  }
+
+  /* Numbers in tables, references and prices align in columns rather
+     than jittering as digits change. */
+  table,
+  .font-data,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Text wrapping is safe to set globally — it changes where lines break,
+     never how wide an element is. */
+  p,
+  li {
+    text-wrap: pretty;
+  }
+
+  /* Display face carries headlines only, never below 24px. */
+  h1,
+  h2,
+  h3 {
+    @apply font-display font-normal;
+    letter-spacing: -0.02em;
+    line-height: 1.12;
+    text-wrap: balance;
+  }
+
+  h4,
+  h5,
+  h6 {
+    @apply font-sans font-semibold;
+    letter-spacing: -0.01em;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* ==========================================================
+     INTERACTION CRAFT
+     ==========================================================
+     The parts nobody itemises and everybody feels.              */
+
+  /* Selection in gold rather than the browser's blue — the one place
+     a stray blue was still getting into a site with no blue in it. */
+  ::selection {
+    background: hsl(var(--accent) / 0.22);
+    color: hsl(var(--foreground));
+  }
+
+  /* A focus ring that traces the element's own shape. The default
+     square outline around a pill-shaped button is the single most
+     common tell of unfinished work. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--accent));
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+
+  /* Keyboard users get the ring; pointer users do not — but the ring
+     must never be removed outright, only scoped. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* Buttons acknowledge the press. 1px is imperceptible as movement
+     and unmistakable as feedback. */
+  button:active:not(:disabled),
+  [role="button"]:active {
+    transform: translateY(1px);
+  }
+
+  /* Anchor scroll targets clear the sticky header instead of hiding
+     beneath it — the reason in-page links so often "do nothing". */
+  :target,
+  [id] {
+    scroll-margin-top: 6rem;
+  }
+
+  /* Images fade in as they decode rather than snapping in. Applies to
+     next/image once it flips to the loaded state. */
+  img {
+    transition: opacity 0.4s ease;
+  }
+
+  /* Long references and email addresses break rather than forcing a
+     horizontal scrollbar on a phone. */
+  .font-data,
+  .break-anywhere {
+    overflow-wrap: anywhere;
+  }
+
+  /* Disabled means disabled: no hover, no pointer, no ambiguity. */
+  [disabled],
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  /* Print: this is a document business, and people print case files.
+     Drop the furniture, keep the record. */
+  @media print {
+    nav,
+    footer,
+    aside,
+    .no-print {
+      display: none !important;
+    }
+
+    .surface,
+    .glass,
+    .glass-panel {
+      background: #fff !important;
+      box-shadow: none !important;
+      border: 1px solid #ccc !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+    }
+
+    body {
+      background: #fff;
+      color: #000;
+      font-size: 11pt;
+    }
+
+    /* Show where a link actually goes, since a printed page cannot
+       be clicked. */
+    a[href^="http"]::after {
+      content: " (" attr(href) ")";
+      font-size: 9pt;
+      color: #555;
+    }
+  }
+}
+
+@layer components {
+  .container-edge {
+    @apply mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-8;
+  }
+
+  /* ---- the data voice ----------------------------------------
+     Every reference number, date and status in the product renders
+     in mono. A glance tells you whether you are reading writing or
+     reading record. This is the signature of the type system.     */
+  .font-data {
+    @apply font-mono tabular-nums;
+    letter-spacing: 0.06em;
+  }
+
+  .label-data {
+    @apply font-mono text-[10px] font-medium uppercase text-muted-foreground;
+    letter-spacing: 0.13em;
+  }
+
+  /* Section eyebrow: gold ink label with a rule running to the edge. */
+  .eyebrow {
+    @apply flex items-center gap-3 font-mono text-[10px] font-medium uppercase;
+    color: hsl(var(--accent-ink));
+    letter-spacing: 0.13em;
+  }
+
+  .eyebrow::after {
+    content: "";
+    @apply h-px flex-1 bg-border;
+  }
+
+  /* Vellum band — used for case-file headers and section alternation.
+     Never as a full-page background. */
+  .band-vellum {
+    @apply border-y border-border bg-secondary;
+  }
+
+
+  /* ---- micro-interactions ------------------------------------------
+     Small confirmations, not decoration. Each one answers "did that
+     register?" — which is the only question a hover state should answer.
+     All are transitions rather than animations, so `prefers-reduced-motion`
+     in the base layer neutralises them automatically.                   */
+
+  /* Gold rule that draws in from the left under a link. Used for inline
+     editorial links and section actions. */
+  .link-sweep {
+    @apply relative inline-flex items-center gap-1.5;
+  }
+
+  .link-sweep::after {
+    content: "";
+    @apply absolute inset-x-0 -bottom-0.5 h-px origin-left scale-x-0 bg-accent;
+    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .link-sweep:hover::after,
+  .link-sweep:focus-visible::after {
+    @apply scale-x-100;
+  }
+
+  /* Row hover for editorial lists: the whole row warms and shifts a hair,
+     so the target reads as the row rather than the words. */
+  .row-hover {
+    transition:
+      background-color 0.2s ease,
+      padding-left 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .row-hover:hover {
+    @apply bg-secondary/60;
+    padding-left: 0.75rem;
+  }
+
+  /* .lift is folded into .surface-interactive — one hover behaviour, not two. */
+  .lift {
+    transition:
+      transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .lift:hover {
+    transform: translateY(-2px);
+  }
+
+
+  /* Touch targets. WCAG 2.5.8 asks for 24x24 CSS px minimum; 44px is the
+     comfortable figure on a phone. Applied via a media query so dense desktop
+     tables are not forced to grow. */
+  @media (pointer: coarse) {
+    a,
+    button,
+    [role="button"],
+    summary,
+    select,
+    input[type="checkbox"],
+    input[type="radio"] {
+      min-height: 40px;
+    }
+
+    /* Inline links inside prose are exempt — a 40px line box would wreck
+       paragraph rhythm. */
+    p a,
+    li a,
+    .prose a,
+    a.link-inline {
+      min-height: 0;
+    }
+  }
+
+
+  /* ==========================================================
+     SURFACE SYSTEM — glass, and the two safer relatives
+     ==========================================================
+     Glassmorphism reads as expensive when it is rare and as cheap
+     when it is everywhere. Three tiers, used deliberately:
+
+       .glass       — over imagery only (hero cards, image overlays)
+       .glass-panel — over light UI (filters, sticky bars, popovers)
+       .surface-soft — no blur at all; the default for content cards
+
+     Two constraints that are not negotiable:
+
+     1. CONTRAST. Blur does not darken. A card over a bright sky is
+        still a bright card, so every glass tier carries an opaque
+        tint underneath the blur — the blur is texture, the tint is
+        what makes text legible.
+     2. COST. `backdrop-filter` forces the compositor to re-rasterise
+        everything behind the element on every frame. Keep it to a
+        handful of elements per view, never inside a scrolling list,
+        and never on an element that animates position.            */
+
+  .glass {
+    background: hsl(216 50% 12% / 0.72);
+    border: 1px solid hsl(0 0% 100% / 0.14);
+    box-shadow:
+      0 1px 0 0 hsl(0 0% 100% / 0.08) inset,
+      0 20px 50px -30px hsl(216 50% 4% / 0.7);
+  }
+
+  .glass-panel {
+    background: hsl(44 30% 97% / 0.78);
+    border: 1px solid hsl(0 0% 100% / 0.6);
+    box-shadow:
+      0 1px 0 0 hsl(0 0% 100% / 0.7) inset,
+      0 12px 32px -20px hsl(216 50% 12% / 0.35);
+  }
+
+  .dark .glass-panel {
+    background: hsl(216 44% 13% / 0.8);
+    border-color: hsl(0 0% 100% / 0.1);
+  }
+
+  /* Blur is applied only where the browser supports it. Without this
+     guard the fallback is a flat translucent panel — which is fine,
+     just less interesting — rather than an unreadable one. */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .glass {
+      background: hsl(216 50% 12% / 0.55);
+      -webkit-backdrop-filter: blur(20px) saturate(1.4);
+      backdrop-filter: blur(20px) saturate(1.4);
+    }
+
+    .glass-panel {
+      background: hsl(44 30% 97% / 0.62);
+      -webkit-backdrop-filter: blur(16px) saturate(1.3);
+      backdrop-filter: blur(16px) saturate(1.3);
+    }
+
+    .dark .glass-panel {
+      background: hsl(216 44% 13% / 0.6);
+    }
+  }
+
+  /* ==========================================================
+     THE SURFACE — one treatment, used everywhere
+     ==========================================================
+     Every box on this site is this shape. Consistency is what makes
+     a site read as designed rather than assembled, so there is one
+     card treatment and two variants of it — not a library.
+
+       .surface          raised: cards, panels, tables, dialogs
+       .surface-inset    recessed: wells, empty states, progress grooves
+       .glass            the same shape, over imagery only
+
+     The recipe: white on ivory, a hairline border, and a TWO-STOP
+     shadow — a 1px contact shadow that seats the card on the page,
+     plus a wide, very soft ambient shadow. One-stop shadows are what
+     make cheap UI look cheap; the contact shadow is the part people
+     do not think to add.                                          */
+
+  .surface {
+    @apply rounded-xl border border-border;
+
+    /* A flat white fill is what makes a card read as a plain rectangle,
+       however good the shadow is. Two additions give it a light source:
+       a barely-there top-lit gradient, and a 1px white inset along the
+       top edge — the highlight you get where a real surface catches
+       light. Both are near-invisible individually and obvious in
+       aggregate. */
+    background: linear-gradient(
+      180deg,
+      hsl(0 0% 100%) 0%,
+      hsl(43 26% 99.3%) 100%
+    );
+    box-shadow:
+      0 1px 0 0 hsl(0 0% 100%) inset,
+      0 1px 2px hsl(216 50% 12% / 0.05),
+      0 14px 32px -24px hsl(216 50% 12% / 0.3);
+  }
+
+  .dark .surface {
+    background: linear-gradient(
+      180deg,
+      hsl(216 44% 13%) 0%,
+      hsl(216 47% 11%) 100%
+    );
+    box-shadow:
+      0 1px 0 0 hsl(0 0% 100% / 0.05) inset,
+      0 1px 2px hsl(216 60% 3% / 0.3),
+      0 14px 32px -24px hsl(216 60% 3% / 0.6);
+  }
+
+  /* Kept as an alias so existing markup does not break. */
+  .surface-soft,
+  .surface-elevated {
+    @apply surface;
+  }
+
+  .surface-inset {
+    @apply rounded-xl border border-border/70 bg-secondary/70;
+    box-shadow: inset 0 1px 3px hsl(216 50% 12% / 0.07);
+  }
+
+  /* Raised surfaces respond to the pointer the same way everywhere:
+     a 2px lift and a gold hairline along the top edge. */
+  .surface-interactive {
+    @apply surface edge-light;
+    transition:
+      transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 0.2s ease;
+  }
+
+  .surface-interactive:hover {
+    transform: translateY(-2px);
+    border-color: hsl(var(--accent) / 0.4);
+    box-shadow:
+      0 1px 2px hsl(216 50% 12% / 0.05),
+      0 22px 44px -26px hsl(216 50% 12% / 0.35);
+  }
+
+  /* A hairline highlight along the top edge, as if catching light.
+     Used on navy surfaces to stop them reading as flat blocks. */
+  .edge-light {
+    position: relative;
+  }
+
+  .edge-light::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(0 0% 100% / 0.55) 30%,
+      hsl(0 0% 100% / 0.55) 70%,
+      transparent
+    );
+  }
+
+  /* On navy the highlight is dimmer, or it reads as a scratch. */
+  .glass.edge-light::before,
+  .bg-ink-900 .edge-light::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(0 0% 100% / 0.2) 30%,
+      hsl(0 0% 100% / 0.2) 70%,
+      transparent
+    );
+  }
+
+  /* A gold hairline that traces the top edge of a card on hover.
+     Subtler than a glow and it does not shift layout. */
+  .edge-gold::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--accent) / 0.55) 30%,
+      hsl(var(--accent) / 0.55) 70%,
+      transparent
+    );
+  }
+
+  /* Machine-readable strip. The signature device: appears under the
+     hero, on the case-file header, and in the footer. Decorative,
+     so it is hidden from screen readers at every call site. */
+  .mrz {
+    @apply overflow-hidden whitespace-nowrap font-mono text-[11px];
+    letter-spacing: 0.2em;
+  }
+}
+
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  .text-gold-ink {
+    color: hsl(var(--accent-ink));
+  }
+
+  /* Perforation dot field for navy surfaces — the security-print
+     texture on a passport page, at very low opacity. */
+  .dot-field {
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      hsl(0 0% 100% / 0.5) 1px,
+      transparent 0
+    );
+    background-size: 22px 22px;
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.35) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.35) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .mask-fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent);
+    mask-image: linear-gradient(to bottom, black 60%, transparent);
+  }
+
+  .mask-fade-x {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      black 8%,
+      black 92%,
+      transparent
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black 8%,
+      black 92%,
+      transparent
+    );
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

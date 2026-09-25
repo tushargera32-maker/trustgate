@@ -1,0 +1,2801 @@
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+--- a/prisma/schema.prisma	2026-08-24 15:03:09.000000000 +0000
++++ b/prisma/schema.prisma	2026-08-30 13:55:08.269938379 +0000
+@@ -618,7 +618,8 @@
+   description String?  @db.Text
+   // JSONLogic-style predicate evaluated against collected answers
+   predicate   Json
+-  // Result label applied when predicate matches: POTENTIALLY_SUITABLE | NEEDS_ASSESSMENT | FURTHER_REVIEW
++  // Result label applied when predicate matches. Must be one of the codes in
++  // OUTCOME_CODES (src/lib/eligibility.ts), which is the single source of truth.
+   outcome     String
+   priority    Int      @default(0)
+   active      Boolean  @default(true)
+@@ -630,7 +631,11 @@
+   email       String
+   phone       String?
+   answers     Json
+-  outcome     String   // POTENTIALLY_SUITABLE | NEEDS_ASSESSMENT | FURTHER_REVIEW
++  // ROUTE_MATCHED | ROUTE_MATCHED_WITH_CARE | ROUTE_UNPUBLISHED | SCOPE_REFERRAL
++  // Kept as String rather than an enum so the triage engine can gain outcomes
++  // without a migration. Source of truth: OUTCOME_CODES in src/lib/eligibility.ts.
++  outcome     String
++  // The engine's reasoning trail, e.g. ["refusal:yes", "outcome:route_matched_with_care"].
+   matchedRules Json?
+   lead        Lead?
+   createdAt   DateTime @default(now())
+diff --git a/src/app/(public)/apply/page.tsx b/src/app/(public)/apply/page.tsx
+--- a/src/app/(public)/apply/page.tsx	2026-08-24 15:03:09.000000000 +0000
++++ b/src/app/(public)/apply/page.tsx	2026-08-30 13:55:08.241466332 +0000
+@@ -50,10 +50,35 @@
+               <form action={action} className="space-y-8" noValidate>
+                 <Group icon={<User className="h-4 w-4" />} title="About you">
+                   <div className="grid gap-4 sm:grid-cols-2">
+-                    <Field id="fullName" label="Full name" required error={state?.fields?.fullName?.[0]} />
+-                    <Field id="email" label="Email" type="email" required error={state?.fields?.email?.[0]} />
+-                    <Field id="phone" label="Phone" type="tel" />
+-                    <Field id="dob" label="Date of birth" type="date" />
++                    <Field
++                      id="fullName"
++                      label="Full name"
++                      required
++                      autoComplete="name"
++                      error={state?.fields?.fullName?.[0]}
++                    />
++                    <Field
++                      id="email"
++                      label="Email"
++                      type="email"
++                      inputMode="email"
++                      autoComplete="email"
++                      required
++                      error={state?.fields?.email?.[0]}
++                    />
++                    <Field
++                      id="phone"
++                      label="Phone"
++                      type="tel"
++                      inputMode="tel"
++                      autoComplete="tel"
++                    />
++                    <Field
++                      id="dob"
++                      label="Date of birth"
++                      type="date"
++                      autoComplete="bday"
++                    />
+                   </div>
+                 </Group>
+                 <Group icon={<MapPin className="h-4 w-4" />} title="Your trip">
+@@ -65,6 +90,7 @@
+                         name="hub"
+                         className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-background px-3.5 text-sm"
+                       >
++                        <option value="">Select where you are applying from</option>
+                         {ORIGIN_HUBS.map((h) => (
+                           <option key={h.slug} value={h.slug}>{h.name}</option>
+                         ))}
+@@ -77,10 +103,13 @@
+                         name="service"
+                         className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-background px-3.5 text-sm"
+                       >
++                        {/* Must stay first: a select adopts its first option as
++                            the default, so any other order silently submits a
++                            visa the applicant never chose. */}
++                        <option value="">Not sure yet — help me work it out</option>
+                         {SERVICES.filter((s) => s.published).map((s) => (
+                           <option key={s.slug} value={s.slug}>{s.name}</option>
+                         ))}
+-                        <option value="">Not sure yet</option>
+                       </select>
+                     </div>
+                     <Field id="travelDate" label="Intended travel date" type="date" />
+@@ -91,9 +120,11 @@
+                         name="purpose"
+                         className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-background px-3.5 text-sm"
+                       >
++                        <option value="">Select a purpose</option>
+                         <option value="Tourism or holiday">Tourism or holiday</option>
+                         <option value="Visiting family or friends">Visiting family or friends</option>
+                         <option value="Short business visit">Short business visit</option>
++                        <option value="Another short visit">Another short visit</option>
+                       </select>
+                     </div>
+                   </div>
+@@ -110,7 +141,10 @@
+                   </div>
+                 </Group>
+                 {state?.ok === false && !state.fields && (
+-                  <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
++                  <p
++                    role="alert"
++                    className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
++                  >
+                     {state.error}
+                   </p>
+                 )}
+@@ -190,22 +224,46 @@
+   label,
+   type = "text",
+   required,
+-  error
++  error,
++  autoComplete,
++  inputMode
+ }: {
+   id: string;
+   label: string;
+   type?: string;
+   required?: boolean;
+   error?: string;
++  autoComplete?: string;
++  inputMode?: "text" | "email" | "tel" | "numeric";
+ }) {
+   return (
+     <div>
+       <Label htmlFor={id}>
+         {label}
+-        {required && <span className="text-destructive"> *</span>}
++        {required && (
++          <span className="text-destructive" aria-hidden="true">
++            {" "}
++            *
++          </span>
++        )}
+       </Label>
+-      <Input id={id} name={id} type={type} required={required} className="mt-1.5" />
+-      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
++      <Input
++        id={id}
++        name={id}
++        type={type}
++        required={required}
++        autoComplete={autoComplete}
++        inputMode={inputMode}
++        aria-required={required || undefined}
++        aria-invalid={error ? true : undefined}
++        aria-describedby={error ? `${id}-error` : undefined}
++        className="mt-1.5"
++      />
++      {error && (
++        <p id={`${id}-error`} className="mt-1 text-xs text-destructive">
++          {error}
++        </p>
++      )}
+     </div>
+   );
+ }
+diff --git a/src/app/(public)/client/login/page.tsx b/src/app/(public)/client/login/page.tsx
+--- a/src/app/(public)/client/login/page.tsx	2026-08-24 15:03:09.000000000 +0000
++++ b/src/app/(public)/client/login/page.tsx	2026-08-30 13:55:08.244069939 +0000
+@@ -124,11 +124,15 @@
+             <div>
+               <div className="flex items-center justify-between">
+                 <Label htmlFor="password">Password</Label>
++                {/* No /client/forgot-password route and no reset flow exists
++                    yet, so this 404'd for a locked-out client. Route to the
++                    channel that can actually help until self-serve reset is
++                    built, then restore the link. */}
+                 <Link
+-                  href="/client/forgot-password"
++                  href="/contact"
+                   className="text-xs text-muted-foreground hover:text-foreground"
+                 >
+-                  Forgot?
++                  Forgot password?
+                 </Link>
+               </div>
+               <div className="relative mt-1.5">
+diff --git a/src/app/(public)/eligibility/page.tsx b/src/app/(public)/eligibility/page.tsx
+--- a/src/app/(public)/eligibility/page.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/app/(public)/eligibility/page.tsx	2026-08-30 13:55:08.235997161 +0000
+@@ -7,9 +7,13 @@
+   ArrowRight,
+   ArrowLeft,
+   CheckCircle2,
+-  Sparkles,
+   ShieldCheck,
+-  Loader2
++  Loader2,
++  RotateCcw,
++  FileText,
++  Info,
++  ExternalLink,
++  Compass
+ } from "lucide-react";
+ import { PageHero } from "@/components/ui/section";
+ import { Card, CardContent } from "@/components/ui/card";
+@@ -17,204 +21,131 @@
+ import { Label } from "@/components/ui/label";
+ import { Button } from "@/components/ui/button";
+ import { Badge } from "@/components/ui/badge";
+-import { ORIGIN_HUBS, SERVICES } from "@/lib/constants";
++import {
++  STEPS,
++  assess,
++  OUTCOME_TONE,
++  type Answers,
++  type AnswerKey,
++  type Assessment
++} from "@/lib/eligibility";
+ import { submitEligibilityResult } from "@/app/actions/leads";
+ 
+-type Step = {
+-  id: string;
+-  question: string;
+-  help?: string;
+-  type: "select" | "radio";
+-  options: { value: string; label: string }[];
+-};
+-
+-const DESTINATION_OPTIONS: { value: string; label: string }[] = (() => {
+-  const seen = new Map<string, { value: string; label: string }>();
+-  for (const s of SERVICES.filter((s) => s.published)) {
+-    if (!seen.has(s.destinationCode)) {
+-      seen.set(s.destinationCode, {
+-        value: s.destinationCode,
+-        label: s.destinationName
+-      });
+-    }
+-  }
+-  return Array.from(seen.values());
+-})();
+-
+-const STEPS: Step[] = [
+-  {
+-    id: "hub",
+-    question: "Where are you applying from?",
+-    help: "We serve clients in the United Kingdom and India only.",
+-    type: "radio",
+-    options: ORIGIN_HUBS.map((h) => ({ value: h.slug, label: h.name }))
+-  },
+-  {
+-    id: "destination",
+-    question: "Where are you travelling to?",
+-    type: "select",
+-    options: DESTINATION_OPTIONS
+-  },
+-  {
+-    id: "purpose",
+-    question: "What is the purpose of your trip?",
+-    help: "We handle visitor and tourist visa applications only. Study, work, and permanent residency applications are outside our practice.",
+-    type: "radio",
+-    options: [
+-      { value: "tourism", label: "Tourism or holiday" },
+-      { value: "family", label: "Visiting family or friends" },
+-      { value: "business-short", label: "Short business visit" },
+-      { value: "other", label: "Other short-stay purpose" }
+-    ]
+-  },
+-  {
+-    id: "dates",
+-    question: "How firm are your travel dates?",
+-    help: "Visa processing times and appointment availability vary by country. Timing is a critical factor in visa application planning.",
+-    type: "radio",
+-    options: [
+-      { value: "booked", label: "Travel booked or close to booking" },
+-      { value: "planned", label: "Planned, more than 6 weeks away" },
+-      { value: "soon", label: "Travelling within 3 weeks" },
+-      { value: "flexible", label: "Flexible / exploring options" }
+-    ]
+-  },
+-  {
+-    id: "funding",
+-    question: "Who is funding the trip?",
+-    type: "radio",
+-    options: [
+-      { value: "self", label: "Myself, from my own funds" },
+-      { value: "sponsor", label: "A host or family member" },
+-      { value: "employer", label: "My employer" },
+-      { value: "unsure", label: "Not sure yet" }
+-    ]
+-  },
+-  {
+-    id: "history",
+-    question: "Have you travelled internationally in the last 5 years?",
+-    type: "radio",
+-    options: [
+-      { value: "yes-similar", label: "Yes - to comparable destinations" },
+-      { value: "yes-other", label: "Yes - elsewhere" },
+-      { value: "no", label: "No, this would be my first trip" }
+-    ]
+-  },
+-  {
+-    id: "refusal",
+-    question: "Have you ever been refused a visa, or refused entry?",
+-    help: "A previous refusal is not fatal. Concealing one is far more damaging.",
+-    type: "radio",
+-    options: [
+-      { value: "no", label: "No" },
+-      { value: "yes", label: "Yes" },
+-      { value: "unsure", label: "I am not sure" }
+-    ]
+-  }
+-];
+-
+-type Outcome = "LIKELY_IN_SCOPE" | "NEEDS_REVIEW" | "OUT_OF_SCOPE";
+-
+-const OUTCOME_COPY: Record<
+-  Outcome,
+-  { label: string; tone: string; body: string }
+-> = {
+-  LIKELY_IN_SCOPE: {
+-    label: "Looks like a route we handle",
+-    tone: "bg-teal-500/10 text-teal-700 ring-teal-500/30",
+-    body: "Based on what you have told us, this looks like a straightforward visitor visa case within our practice. The next step is a consultation to confirm which visa applies to you and to review your evidence properly."
+-  },
+-  NEEDS_REVIEW: {
+-    label: "Worth a conversation first",
+-    tone: "bg-gold-500/10 text-gold-800 ring-gold-500/30",
+-    body: "There is something here that needs a human to look at - a tight timeline, a previous refusal, or funding that needs evidencing carefully. None of that rules the application out, but it does change how we would build it."
+-  },
+-  OUT_OF_SCOPE: {
+-    label: "Probably not one for us",
+-    tone: "bg-muted text-muted-foreground ring-border",
+-    body: "From your answers, this may fall outside visitor and tourist visas - which is the only thing we do. We would rather say so now than take the enquiry. You are still welcome to speak to us and we will point you in the right direction."
+-  }
+-};
+-
+ export default function EligibilityPage() {
+   const reduce = useReducedMotion();
+   const [step, setStep] = React.useState(0);
+-  const [answers, setAnswers] = React.useState<Record<string, string>>({});
+-  const [email, setEmail] = React.useState("");
++  const [answers, setAnswers] = React.useState<Answers>({});
++  const [result, setResult] = React.useState<Assessment | null>(null);
++
+   const [name, setName] = React.useState("");
+-  const [done, setDone] = React.useState<Outcome | null>(null);
++  const [email, setEmail] = React.useState("");
++  const [phone, setPhone] = React.useState("");
+   const [saving, setSaving] = React.useState(false);
+   const [saved, setSaved] = React.useState(false);
+   const [saveError, setSaveError] = React.useState<string | null>(null);
+ 
+   const total = STEPS.length;
+-  const pct = Math.round((step / total) * 100);
++  const current = STEPS[step];
++  const canContinue = current ? Boolean(answers[current.id]) : false;
++  const pct = Math.round(((result ? total : step) / total) * 100);
+ 
+-  function set(key: string, value: string) {
+-    setAnswers((a) => ({ ...a, [key]: value }));
+-  }
++  /* The question heading takes focus on each step. Without this a keyboard
++     or screen-reader user is left at the top of the document after every
++     answer and has to re-traverse the page to find what changed. */
++  const headingRef = React.useRef<HTMLHeadingElement>(null);
++  React.useEffect(() => {
++    headingRef.current?.focus();
++  }, [step, result]);
+ 
+-  function computeOutcome(): Outcome {
+-    const { hub, destination, purpose, dates, funding, history, refusal } = answers;
+-    const routeExists = SERVICES.some(
+-      (s) => s.published && s.hub === hub && s.destinationCode === destination
+-    );
+-    if (purpose === "other" || !routeExists) return "OUT_OF_SCOPE";
+-    let flags = 0;
+-    if (dates === "soon") flags += 1;
+-    if (funding === "unsure") flags += 1;
+-    if (history === "no") flags += 1;
+-    if (refusal === "yes" || refusal === "unsure") flags += 2;
+-    if (flags >= 2) return "NEEDS_REVIEW";
+-    return "LIKELY_IN_SCOPE";
++  function set(key: AnswerKey, value: string) {
++    setAnswers((a) => ({ ...a, [key]: value }));
+   }
+ 
+   function next() {
+-    if (step === total - 1) setDone(computeOutcome());
++    if (step === total - 1) setResult(assess(answers));
+     else setStep((s) => s + 1);
+   }
+ 
+   function back() {
++    if (result) {
++      setResult(null);
++      return;
++    }
+     setStep((s) => Math.max(0, s - 1));
+   }
+ 
++  function restart() {
++    setAnswers({});
++    setStep(0);
++    setResult(null);
++    setSaved(false);
++    setSaveError(null);
++  }
++
++  /* Arrow keys move between options, which is what a radio group is
++     expected to do. Previously these were plain buttons, so a keyboard
++     user had to tab through every option on every step. */
++  function onOptionKeyDown(e: React.KeyboardEvent, index: number) {
++    if (!current) return;
++    const keys = ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"];
++    if (!keys.includes(e.key)) return;
++    e.preventDefault();
++    const forward = e.key === "ArrowDown" || e.key === "ArrowRight";
++    const nextIndex =
++      (index + (forward ? 1 : -1) + current.options.length) %
++      current.options.length;
++    set(current.id, current.options[nextIndex].value);
++    const group = e.currentTarget.parentElement;
++    (group?.children[nextIndex] as HTMLElement | undefined)?.focus();
++  }
++
+   async function handleSave() {
+-    if (!done || !name || !email) return;
++    if (!result || !name || !email) return;
+     setSaving(true);
+     setSaveError(null);
+-    const result = await submitEligibilityResult({ name, email, answers, outcome: done });
++    const res = await submitEligibilityResult({
++      name,
++      email,
++      phone: phone || undefined,
++      answers: answers as Record<string, string>,
++      outcome: result.outcome,
++      flags: result.flags
++    });
+     setSaving(false);
+-    if (result.ok) {
+-      setSaved(true);
+-    } else {
+-      setSaveError(result.error);
+-    }
++    if (res.ok) setSaved(true);
++    else setSaveError(res.error);
+   }
+ 
+-  const current = STEPS[step];
+-  const canContinue = current ? Boolean(answers[current.id]) : false;
+-
+   return (
+     <>
+       <PageHero
+         eyebrow="Eligibility check"
+-        title="Find out whether we are the right firm for your trip."
+-        description="A short, free triage. It tells you whether your case is one we handle and what we would need to look at - it is not a prediction of the decision."
++        title="Find the route that fits your trip."
++        description="A short, free triage. It tells you whether your case is one we handle, what would strengthen it, and what to do next — it is not a prediction of the decision."
+       />
++
+       <section className="container-edge my-12">
+         <div className="mx-auto max-w-3xl">
++          {/* ---- progress ---- */}
+           <div className="mb-6">
+             <div className="flex items-center justify-between text-xs text-muted-foreground">
+-              <span>
+-                Step {done ? total : step + 1} of {total}
++              <span className="font-data" aria-live="polite">
++                {result ? "Result" : `Step ${step + 1} of ${total}`}
+               </span>
+-              <span>{done ? 100 : pct}%</span>
++              <span className="font-data">{pct}%</span>
+             </div>
+-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
++            <div
++              className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-secondary"
++              role="progressbar"
++              aria-valuenow={pct}
++              aria-valuemin={0}
++              aria-valuemax={100}
++              aria-label="Eligibility check progress"
++            >
+               <motion.div
+                 className="h-full rounded-full bg-gradient-to-r from-gold-400 to-gold-600"
+-                animate={{ width: `${done ? 100 : pct}%` }}
+-                transition={{ duration: 0.4 }}
++                animate={{ width: `${pct}%` }}
++                transition={{ duration: reduce ? 0 : 0.4 }}
+               />
+             </div>
+           </div>
+@@ -222,57 +153,104 @@
+           <Card>
+             <CardContent className="p-6 sm:p-10">
+               <AnimatePresence mode="wait">
+-                {!done ? (
++                {!result ? (
+                   <motion.div
+                     key={current.id}
+                     initial={reduce ? false : { opacity: 0, y: 12 }}
+                     animate={{ opacity: 1, y: 0 }}
+-                    exit={{ opacity: 0, y: -8 }}
+-                    transition={{ duration: 0.25 }}
++                    exit={reduce ? undefined : { opacity: 0, y: -8 }}
++                    transition={{ duration: reduce ? 0 : 0.25 }}
+                   >
+-                    <h2 className="font-display text-2xl">
++                    <h2
++                      ref={headingRef}
++                      tabIndex={-1}
++                      id={`q-${current.id}`}
++                      className="font-display text-2xl outline-none"
++                    >
+                       {current.question}
+                     </h2>
+                     {current.help && (
+-                      <p className="mt-2 text-sm text-muted-foreground">
++                      <p
++                        id={`help-${current.id}`}
++                        className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground"
++                      >
+                         {current.help}
+                       </p>
+                     )}
+ 
+                     <div className="mt-7">
+-                      {current.type === "select" && (
+-                        <select
+-                          className="flex h-11 w-full max-w-sm rounded-md border border-input bg-background px-3.5 text-sm"
+-                          value={answers[current.id] ?? ""}
+-                          onChange={(e) => set(current.id, e.target.value)}
++                      {current.type === "select" ? (
++                        <div className="max-w-sm">
++                          <Label htmlFor={`sel-${current.id}`} className="sr-only">
++                            {current.question}
++                          </Label>
++                          <select
++                            id={`sel-${current.id}`}
++                            aria-describedby={
++                              current.help ? `help-${current.id}` : undefined
++                            }
++                            className="flex h-11 w-full rounded-md border border-input bg-background px-3.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
++                            value={answers[current.id] ?? ""}
++                            onChange={(e) => set(current.id, e.target.value)}
++                          >
++                            <option value="">Select a destination…</option>
++                            {current.options.map((o) => (
++                              <option key={o.value} value={o.value}>
++                                {o.label}
++                              </option>
++                            ))}
++                          </select>
++                          {answers[current.id] && (
++                            <p className="mt-2 text-xs text-muted-foreground">
++                              {
++                                current.options.find(
++                                  (o) => o.value === answers[current.id]
++                                )?.hint
++                              }
++                            </p>
++                          )}
++                        </div>
++                      ) : (
++                        <div
++                          role="radiogroup"
++                          aria-labelledby={`q-${current.id}`}
++                          aria-describedby={
++                            current.help ? `help-${current.id}` : undefined
++                          }
++                          className="grid gap-2 sm:grid-cols-2"
+                         >
+-                          <option value="">Select…</option>
+-                          {current.options.map((o) => (
+-                            <option key={o.value} value={o.value}>
+-                              {o.label}
+-                            </option>
+-                          ))}
+-                        </select>
+-                      )}
+-                      {current.type === "radio" && (
+-                        <div className="grid gap-2 sm:grid-cols-2">
+-                          {current.options.map((o) => {
++                          {current.options.map((o, i) => {
+                             const active = answers[current.id] === o.value;
+                             return (
+                               <button
+                                 key={o.value}
+                                 type="button"
++                                role="radio"
++                                aria-checked={active}
++                                tabIndex={
++                                  active || (!answers[current.id] && i === 0)
++                                    ? 0
++                                    : -1
++                                }
++                                onKeyDown={(e) => onOptionKeyDown(e, i)}
+                                 onClick={() => set(current.id, o.value)}
+                                 className={
+-                                  "flex items-center justify-between rounded-lg border px-4 py-3 text-left text-sm transition-all " +
++                                  "flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-all " +
+                                   (active
+                                     ? "border-gold-500 bg-gold-500/5 ring-1 ring-gold-500/40"
+                                     : "border-border bg-card hover:bg-secondary/30")
+                                 }
+                               >
+-                                <span className="font-medium">{o.label}</span>
++                                <span>
++                                  <span className="font-medium">{o.label}</span>
++                                  {o.hint && (
++                                    <span className="mt-0.5 block text-xs font-normal leading-snug text-muted-foreground">
++                                      {o.hint}
++                                    </span>
++                                  )}
++                                </span>
+                                 {active && (
+-                                  <CheckCircle2 className="h-4 w-4 text-gold-600" />
++                                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-600" />
+                                 )}
+                               </button>
+                             );
+@@ -281,123 +259,43 @@
+                       )}
+                     </div>
+ 
+-                    <div className="mt-8 flex items-center justify-between">
+-                      <Button variant="ghost" onClick={back} disabled={step === 0}>
++                    <div className="mt-8 flex items-center justify-between gap-3">
++                      <Button
++                        variant="ghost"
++                        onClick={back}
++                        disabled={step === 0}
++                      >
+                         <ArrowLeft className="h-4 w-4" /> Back
+                       </Button>
+-                      <Button onClick={next} disabled={!canContinue} variant="gold">
+-                        {step === total - 1 ? "See result" : "Next"}
++                      <Button
++                        onClick={next}
++                        disabled={!canContinue}
++                        variant="gold"
++                      >
++                        {step === total - 1 ? "See my result" : "Next"}
+                         <ArrowRight className="h-4 w-4" />
+                       </Button>
+                     </div>
+                   </motion.div>
+                 ) : (
+-                  <motion.div
++                  <ResultView
+                     key="result"
+-                    initial={reduce ? false : { opacity: 0, y: 12 }}
+-                    animate={{ opacity: 1, y: 0 }}
+-                    className="text-center"
+-                  >
+-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-gold-500/10 text-gold-700 ring-1 ring-gold-500/30">
+-                      <Sparkles className="h-6 w-6" />
+-                    </div>
+-                    <h2 className="mt-5 font-display text-3xl">
+-                      Preliminary result
+-                    </h2>
+-                    <Badge
+-                      variant="outline"
+-                      className={`mt-4 inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ${OUTCOME_COPY[done].tone}`}
+-                    >
+-                      {OUTCOME_COPY[done].label}
+-                    </Badge>
+-                    <p className="mx-auto mt-4 max-w-md text-base leading-relaxed text-muted-foreground">
+-                      {OUTCOME_COPY[done].body}
+-                    </p>
+-
+-                    <Card className="mt-8 text-left">
+-                      <CardContent className="p-6">
+-                        {saved ? (
+-                          <div className="flex flex-col items-center gap-3 py-4 text-center">
+-                            <CheckCircle2 className="h-8 w-8 text-teal-600" />
+-                            <p className="font-display text-base">Result saved.</p>
+-                            <p className="text-sm text-muted-foreground">
+-                              A counsellor will follow up within one business day.
+-                            </p>
+-                          </div>
+-                        ) : (
+-                          <>
+-                            <h3 className="font-display text-base">
+-                              Save your result
+-                            </h3>
+-                            <p className="mt-1 text-xs text-muted-foreground">
+-                              A counsellor will follow up within one business day.
+-                            </p>
+-                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+-                              <div>
+-                                <Label htmlFor="res-name">Full name</Label>
+-                                <Input
+-                                  id="res-name"
+-                                  className="mt-1.5"
+-                                  value={name}
+-                                  onChange={(e) => setName(e.target.value)}
+-                                  placeholder="Jane Doe"
+-                                />
+-                              </div>
+-                              <div>
+-                                <Label htmlFor="res-email">Email</Label>
+-                                <Input
+-                                  id="res-email"
+-                                  type="email"
+-                                  className="mt-1.5"
+-                                  value={email}
+-                                  onChange={(e) => setEmail(e.target.value)}
+-                                  placeholder="you@email.com"
+-                                />
+-                              </div>
+-                            </div>
+-                            {saveError && (
+-                              <p className="mt-2 text-xs text-destructive">{saveError}</p>
+-                            )}
+-                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+-                              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+-                                <ShieldCheck className="h-3.5 w-3.5 text-gold-600" />
+-                                Confidential. Not shared.
+-                              </p>
+-                              <Button
+-                                disabled={!email || !name || saving}
+-                                onClick={handleSave}
+-                              >
+-                                {saving ? (
+-                                  <>
+-                                    <Loader2 className="h-4 w-4 animate-spin" />
+-                                    Saving…
+-                                  </>
+-                                ) : (
+-                                  "Send my result"
+-                                )}
+-                              </Button>
+-                            </div>
+-                          </>
+-                        )}
+-                      </CardContent>
+-                    </Card>
+-
+-                    <div className="mt-8 flex flex-wrap justify-center gap-3">
+-                      <Button asChild variant="gold">
+-                        <Link href="/contact">Book a consultation</Link>
+-                      </Button>
+-                      <Button asChild variant="outline">
+-                        <Link href="/countries">Browse destinations</Link>
+-                      </Button>
+-                    </div>
+-                    <p className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
+-                      This is a preliminary triage for general guidance only. It
+-                      is not legal advice, it does not assess your eligibility
+-                      against any immigration rule, and it says nothing about
+-                      whether an application would be granted. Visa decisions
+-                      are made solely by the relevant immigration authority.
+-                    </p>
+-                  </motion.div>
++                    result={result}
++                    reduce={Boolean(reduce)}
++                    headingRef={headingRef}
++                    name={name}
++                    email={email}
++                    phone={phone}
++                    saving={saving}
++                    saved={saved}
++                    saveError={saveError}
++                    onName={setName}
++                    onEmail={setEmail}
++                    onPhone={setPhone}
++                    onSave={handleSave}
++                    onBack={back}
++                    onRestart={restart}
++                  />
+                 )}
+               </AnimatePresence>
+             </CardContent>
+@@ -407,3 +305,387 @@
+     </>
+   );
+ }
++
++/* ───────────────────────── Result ───────────────────────── */
++
++function ResultView({
++  result,
++  reduce,
++  headingRef,
++  name,
++  email,
++  phone,
++  saving,
++  saved,
++  saveError,
++  onName,
++  onEmail,
++  onPhone,
++  onSave,
++  onBack,
++  onRestart
++}: {
++  result: Assessment;
++  reduce: boolean;
++  headingRef: React.RefObject<HTMLHeadingElement>;
++  name: string;
++  email: string;
++  phone: string;
++  saving: boolean;
++  saved: boolean;
++  saveError: string | null;
++  onName: (v: string) => void;
++  onEmail: (v: string) => void;
++  onPhone: (v: string) => void;
++  onSave: () => void;
++  onBack: () => void;
++  onRestart: () => void;
++}) {
++  const tone = OUTCOME_TONE[result.outcome];
++
++  return (
++    <motion.div
++      initial={reduce ? false : { opacity: 0, y: 12 }}
++      animate={{ opacity: 1, y: 0 }}
++      transition={{ duration: reduce ? 0 : 0.3 }}
++    >
++      {/* ---- verdict ---- */}
++      <div className="text-center">
++        <Badge
++          variant="outline"
++          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ${tone.className}`}
++        >
++          {tone.label}
++        </Badge>
++        <h2
++          ref={headingRef}
++          tabIndex={-1}
++          className="mt-4 text-balance font-display text-3xl outline-none"
++        >
++          {result.headline}
++        </h2>
++        <p className="mx-auto mt-4 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground">
++          {result.summary}
++        </p>
++      </div>
++
++      {/* ---- what is working / what needs work ----
++          Both columns are shown together deliberately. A list of problems
++          with no counterweight reads as a rejection even when it is not
++          one, and a list of positives with no counterweight is a sales
++          page rather than an assessment. */}
++      {(result.strengths.length > 0 || result.watchPoints.length > 0) && (
++        <div className="mt-9 grid gap-4 md:grid-cols-2">
++          {result.strengths.length > 0 && (
++            <FindingList
++              title="Working in your favour"
++              tone="positive"
++              items={result.strengths}
++            />
++          )}
++          {result.watchPoints.length > 0 && (
++            <FindingList
++              title="What to prepare for"
++              tone="attention"
++              items={result.watchPoints}
++            />
++          )}
++        </div>
++      )}
++
++      {/* ---- next steps ---- */}
++      <div className="surface-inset mt-4 p-6 text-left">
++        <h3 className="flex items-center gap-2 font-display text-base">
++          <Compass className="h-4 w-4 text-accent-ink" />
++          Your next step
++        </h3>
++        <ol className="mt-4 space-y-3">
++          {result.nextSteps.map((s, i) => (
++            <li key={s} className="flex gap-3 text-sm leading-relaxed">
++              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gold-500/10 font-data text-[11px] font-semibold text-gold-700">
++                {i + 1}
++              </span>
++              <span className="text-muted-foreground">{s}</span>
++            </li>
++          ))}
++        </ol>
++      </div>
++
++      {/* ---- the route(s) ---- */}
++      {(result.primaryService || result.alternatives.length > 0) && (
++        <div className="mt-4 grid gap-3 sm:grid-cols-2">
++          {result.primaryService && (
++            <RouteCard
++              href={result.primaryService.href}
++              name={result.primaryService.name}
++              reason="The desk we would run this under."
++              primary
++            />
++          )}
++          {result.alternatives.map((alt) => (
++            <RouteCard
++              key={alt.slug}
++              href={alt.href}
++              name={alt.name}
++              reason={alt.reason ?? "Another route we run."}
++            />
++          ))}
++        </div>
++      )}
++
++      {/* ---- documents ---- */}
++      {result.documents.length > 0 && (
++        <div className="surface mt-4 p-6 text-left">
++          <h3 className="flex items-center gap-2 font-display text-base">
++            <FileText className="h-4 w-4 text-accent-ink" />
++            What you will typically need
++          </h3>
++          <p className="mt-1 text-xs text-muted-foreground">
++            Published for this service. We confirm the exact list on the
++            consultation, once we know your circumstances.
++          </p>
++          <ul className="mt-4 grid gap-2 sm:grid-cols-2">
++            {result.documents.map((d) => (
++              <li
++                key={d}
++                className="flex gap-2 text-sm leading-snug text-muted-foreground"
++              >
++                <span aria-hidden="true" className="mt-2 h-1 w-1 shrink-0 rounded-full bg-accent" />
++                {d}
++              </li>
++            ))}
++          </ul>
++        </div>
++      )}
++
++      {/* ---- service considerations ---- */}
++      {result.considerations.length > 0 && (
++        <div className="surface-inset mt-4 p-6 text-left">
++          <h3 className="flex items-center gap-2 font-display text-base">
++            <Info className="h-4 w-4 text-accent-ink" />
++            Worth knowing about this route
++          </h3>
++          <ul className="mt-4 space-y-2.5">
++            {result.considerations.map((c) => (
++              <li key={c} className="text-sm leading-relaxed text-muted-foreground">
++                {c}
++              </li>
++            ))}
++          </ul>
++          {result.officialSource && (
++            <a
++              href={result.officialSource.url}
++              target="_blank"
++              rel="noopener noreferrer"
++              className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-accent-ink hover:underline"
++            >
++              {result.officialSource.name}
++              <ExternalLink className="h-3.5 w-3.5" />
++            </a>
++          )}
++        </div>
++      )}
++
++      {/* ---- capture ---- */}
++      <Card className="mt-4 text-left">
++        <CardContent className="p-6">
++          {saved ? (
++            <div className="flex flex-col items-center gap-3 py-4 text-center">
++              <CheckCircle2 className="h-8 w-8 text-teal-600" />
++              <p className="font-display text-base">Result sent</p>
++              <p className="max-w-sm text-sm text-muted-foreground">
++                A counsellor has your answers and will come back within one
++                business day.
++              </p>
++              <Button asChild variant="gold" className="mt-2">
++                <Link href="/contact">Book a consultation now</Link>
++              </Button>
++            </div>
++          ) : (
++            <>
++              <h3 className="font-display text-base">Send this to a counsellor</h3>
++              <p className="mt-1 text-xs text-muted-foreground">
++                They will have your answers before you speak, so the call
++                starts somewhere useful. One business day, no charge.
++              </p>
++              <div className="mt-4 grid gap-3 sm:grid-cols-3">
++                <div>
++                  <Label htmlFor="res-name">Full name</Label>
++                  <Input
++                    id="res-name"
++                    name="name"
++                    autoComplete="name"
++                    className="mt-1.5"
++                    value={name}
++                    onChange={(e) => onName(e.target.value)}
++                    placeholder="Jane Doe"
++                  />
++                </div>
++                <div>
++                  <Label htmlFor="res-email">Email</Label>
++                  <Input
++                    id="res-email"
++                    name="email"
++                    type="email"
++                    inputMode="email"
++                    autoComplete="email"
++                    className="mt-1.5"
++                    value={email}
++                    onChange={(e) => onEmail(e.target.value)}
++                    placeholder="you@email.com"
++                  />
++                </div>
++                <div>
++                  <Label htmlFor="res-phone">
++                    Phone{" "}
++                    <span className="font-normal text-muted-foreground">
++                      (optional)
++                    </span>
++                  </Label>
++                  <Input
++                    id="res-phone"
++                    name="phone"
++                    type="tel"
++                    inputMode="tel"
++                    autoComplete="tel"
++                    className="mt-1.5"
++                    value={phone}
++                    onChange={(e) => onPhone(e.target.value)}
++                    placeholder="+44 7700 900000"
++                  />
++                </div>
++              </div>
++              {saveError && (
++                <p
++                  role="alert"
++                  className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
++                >
++                  {saveError}
++                </p>
++              )}
++              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
++                <p className="flex items-center gap-2 text-xs text-muted-foreground">
++                  <ShieldCheck className="h-3.5 w-3.5 text-gold-600" />
++                  Confidential. Not shared.
++                </p>
++                <Button
++                  variant="gold"
++                  disabled={!email || !name || saving}
++                  onClick={onSave}
++                >
++                  {saving ? (
++                    <>
++                      <Loader2 className="h-4 w-4 animate-spin" />
++                      Sending…
++                    </>
++                  ) : (
++                    "Send my result"
++                  )}
++                </Button>
++              </div>
++            </>
++          )}
++        </CardContent>
++      </Card>
++
++      {/* ---- escape hatches ---- */}
++      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
++        <Button variant="outline" onClick={onBack}>
++          <ArrowLeft className="h-4 w-4" />
++          Change my last answer
++        </Button>
++        <Button variant="ghost" onClick={onRestart}>
++          <RotateCcw className="h-4 w-4" />
++          Start again
++        </Button>
++        <Button asChild variant="ghost">
++          <Link href="/countries">Browse destinations</Link>
++        </Button>
++      </div>
++
++      <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-foreground">
++        This is a preliminary triage for general guidance only. It is not
++        legal advice, it does not assess your eligibility against any
++        immigration rule, and it says nothing about whether an application
++        would be granted. Visa decisions are made solely by the relevant
++        immigration authority.
++      </p>
++    </motion.div>
++  );
++}
++
++/* ───────────────────────── Small parts ───────────────────────── */
++
++function FindingList({
++  title,
++  tone,
++  items
++}: {
++  title: string;
++  tone: "positive" | "attention";
++  items: { title: string; detail: string }[];
++}) {
++  const positive = tone === "positive";
++  return (
++    <div className="surface p-6 text-left">
++      <h3 className="font-display text-base">{title}</h3>
++      <ul className="mt-4 space-y-4">
++        {items.map((f) => (
++          <li key={f.title}>
++            <div className="flex items-start gap-2.5">
++              <span
++                aria-hidden="true"
++                className={
++                  "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full " +
++                  (positive ? "bg-teal-500" : "bg-gold-500")
++                }
++              />
++              <div>
++                <p className="text-sm font-medium leading-snug">{f.title}</p>
++                <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
++                  {f.detail}
++                </p>
++              </div>
++            </div>
++          </li>
++        ))}
++      </ul>
++    </div>
++  );
++}
++
++function RouteCard({
++  href,
++  name,
++  reason,
++  primary
++}: {
++  href: string;
++  name: string;
++  reason: string;
++  primary?: boolean;
++}) {
++  return (
++    <Link
++      href={href}
++      className={
++        "surface-interactive group flex flex-col justify-between gap-3 p-5 text-left " +
++        (primary ? "border-gold-500/40" : "")
++      }
++    >
++      <div>
++        {primary && (
++          <span className="label-data text-accent-ink">Recommended route</span>
++        )}
++        <p className="mt-1 font-display text-base leading-snug">{name}</p>
++        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
++          {reason}
++        </p>
++      </div>
++      <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent-ink">
++        See what this involves
++        <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
++      </span>
++    </Link>
++  );
++}
+diff --git a/src/app/actions/leads.ts b/src/app/actions/leads.ts
+--- a/src/app/actions/leads.ts	2026-08-24 15:03:08.000000000 +0000
++++ b/src/app/actions/leads.ts	2026-08-30 13:55:08.238819887 +0000
+@@ -2,6 +2,13 @@
+ 
+ import { z } from "zod";
+ import { prisma } from "@/lib/db";
++import {
++  OUTCOME_CODES,
++  describeAnswers,
++  destinationName,
++  hubName,
++  type OutcomeCode
++} from "@/lib/eligibility";
+ 
+ /* ─────────────────────────────────────────────────────────────
+    Shared result type
+@@ -143,7 +150,10 @@
+   email: z.string().email("Valid email required"),
+   phone: z.string().optional(),
+   answers: z.record(z.string()),
+-  outcome: z.enum(["LIKELY_IN_SCOPE", "NEEDS_REVIEW", "OUT_OF_SCOPE"])
++  outcome: z.enum(OUTCOME_CODES),
++  /** The engine's reasoning trail. Stored so a counsellor opening the lead
++   *  can see which signals produced the result, rather than re-deriving it. */
++  flags: z.array(z.string()).optional()
+ });
+ 
+ export async function submitEligibilityResult(input: {
+@@ -151,14 +161,21 @@
+   email: string;
+   phone?: string;
+   answers: Record<string, string>;
+-  outcome: "LIKELY_IN_SCOPE" | "NEEDS_REVIEW" | "OUT_OF_SCOPE";
++  outcome: OutcomeCode;
++  flags?: string[];
+ }): Promise<ActionResult> {
+   const parsed = eligibilitySchema.safeParse(input);
+   if (!parsed.success) {
+     return { ok: false, error: "Invalid submission data." };
+   }
+ 
+-  const { name, email, phone, answers, outcome } = parsed.data;
++  const { name, email, phone, answers, outcome, flags } = parsed.data;
++
++  /* The CRM previously stored raw slugs — countryOfInterest: "SCH",
++     visaTypeInterest: "From uk" — which a counsellor then had to decode.
++     Resolve them to the same labels the client saw. */
++  const destination = destinationName(answers.destination);
++  const origin = hubName(answers.hub);
+ 
+   try {
+     const result = await prisma.eligibilityResult.create({
+@@ -167,7 +184,8 @@
+         email,
+         phone: phone ?? null,
+         answers,
+-        outcome
++        outcome,
++        matchedRules: flags ?? []
+       }
+     });
+ 
+@@ -176,14 +194,20 @@
+         fullName: name,
+         email,
+         phone: phone ?? null,
+-        countryOfInterest: answers.destination ?? null,
+-        visaTypeInterest: answers.hub
+-          ? `From ${answers.hub}`
+-          : null,
++        countryOfInterest: destination,
++        visaTypeInterest: `${origin} → ${destination}`,
+         source: "ELIGIBILITY_FORM",
+         stage: "NEW",
+         eligibilityResultId: result.id,
+-        notes: `Outcome: ${outcome}\nAnswers: ${JSON.stringify(answers, null, 2)}`
++        notes: [
++          `Triage outcome: ${outcome}`,
++          "",
++          describeAnswers(answers),
++          "",
++          flags?.length ? `Signals: ${flags.join(", ")}` : null
++        ]
++          .filter((l) => l !== null)
++          .join("\n")
+       }
+     });
+ 
+diff --git a/src/app/admin/(dashboard)/blog/blog-content.tsx b/src/app/admin/(dashboard)/blog/blog-content.tsx
+--- a/src/app/admin/(dashboard)/blog/blog-content.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/app/admin/(dashboard)/blog/blog-content.tsx	2026-08-30 13:55:08.267299477 +0000
+@@ -243,8 +243,16 @@
+                         className="flex-1 gap-2 sm:flex-none"
+                         asChild
+                       >
+-                        <Link href={`/blog/${post.slug}`} target="_blank">
+-                          <Eye className="h-3.5 w-3.5" /> View
++                        {/* /blog/[slug] does not exist yet, so this opened a
++                            blank 404 tab. Point at the index until the detail
++                            route is built, then restore the slug link. */}
++                        <Link
++                          href="/blog"
++                          target="_blank"
++                          rel="noopener noreferrer"
++                          title="Opens the public blog index — post detail pages are not built yet"
++                        >
++                          <Eye className="h-3.5 w-3.5" /> View live
+                         </Link>
+                       </Button>
+                     )}
+diff --git a/src/app/client/(dashboard)/layout.tsx b/src/app/client/(dashboard)/layout.tsx
+--- a/src/app/client/(dashboard)/layout.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/app/client/(dashboard)/layout.tsx	2026-08-30 13:55:08.264769853 +0000
+@@ -1,6 +1,7 @@
+ import { requireSession } from "@/lib/auth";
+ import { ClientSidebar } from "@/components/client/sidebar";
+ import { ClientTopbar } from "@/components/client/topbar";
++import { ClientShellProvider } from "@/components/client/shell-context";
+ 
+ export default async function ClientLayout({
+   children
+@@ -8,16 +9,24 @@
+   children: React.ReactNode;
+ }) {
+   const session = await requireSession();
++
+   return (
+-    <div className="flex min-h-screen bg-secondary/20">
+-      <ClientSidebar />
+-      <div className="flex min-h-screen flex-1 flex-col">
+-        <ClientTopbar
+-          userName={session.user.name ?? session.user.email ?? "Client"}
+-          userEmail={session.user.email ?? ""}
+-        />
+-        <main className="flex-1 px-4 pb-12 pt-6 sm:px-8">{children}</main>
++    /* The provider wraps both the sidebar and the topbar because the mobile
++       drawer is opened from one and rendered by the other. See
++       shell-context.tsx for what was broken before. */
++    <ClientShellProvider>
++      <div className="flex min-h-screen bg-secondary/20">
++        <ClientSidebar />
++        <div className="flex min-h-screen flex-1 flex-col">
++          <ClientTopbar
++            userName={session.user.name ?? session.user.email ?? "Client"}
++            userEmail={session.user.email ?? ""}
++          />
++          <main id="client-main" className="flex-1 px-4 pb-12 pt-6 sm:px-8">
++            {children}
++          </main>
++        </div>
+       </div>
+-    </div>
++    </ClientShellProvider>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/src/components/admin/sidebar.tsx b/src/components/admin/sidebar.tsx
+--- a/src/components/admin/sidebar.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/components/admin/sidebar.tsx	2026-08-30 13:55:08.259583187 +0000
+@@ -73,11 +73,30 @@
+   const pathname = usePathname();
+   const [open, setOpen] = React.useState(false);
+ 
++  /* Escape closes the drawer, and the page behind it stops scrolling while
++     it is open. Neither was handled before, so the only way out was to hit
++     the small X or tap a link. */
++  React.useEffect(() => {
++    if (!open) return;
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key === "Escape") setOpen(false);
++    };
++    window.addEventListener("keydown", onKey);
++    const previous = document.body.style.overflow;
++    document.body.style.overflow = "hidden";
++    return () => {
++      window.removeEventListener("keydown", onKey);
++      document.body.style.overflow = previous;
++    };
++  }, [open]);
++
+   return (
+     <>
+       {/* Mobile overlay */}
+       {open && (
+-        <div
++        <button
++          type="button"
++          aria-label="Close navigation menu"
+           onClick={() => setOpen(false)}
+           className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
+         />
+@@ -85,6 +104,7 @@
+ 
+       {/* Sidebar */}
+       <aside
++        aria-label="Admin navigation"
+         className={cn(
+           "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r bg-card transition-transform duration-300 lg:translate-x-0",
+           open ? "translate-x-0" : "-translate-x-full"
+@@ -108,8 +128,9 @@
+             size="icon"
+             onClick={() => setOpen(false)}
+             className="lg:hidden"
++            aria-label="Close navigation menu"
+           >
+-            <X className="h-4 w-4" />
++            <X className="h-4 w-4" aria-hidden="true" />
+           </Button>
+         </div>
+ 
+@@ -131,6 +152,7 @@
+                       <Link
+                         href={item.href}
+                         onClick={() => setOpen(false)}
++                        aria-current={active ? "page" : undefined}
+                         className={cn(
+                           "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                           active
+@@ -138,7 +160,7 @@
+                             : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                         )}
+                       >
+-                        <Icon className="h-4 w-4 shrink-0" />
++                        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                         <span className="truncate">{item.label}</span>
+                       </Link>
+                     </li>
+@@ -161,32 +183,20 @@
+         </div>
+       </aside>
+ 
+-      {/* Mobile trigger */}
+-      <Button
+-        variant="outline"
+-        size="icon"
+-        onClick={() => setOpen(true)}
+-        className="fixed bottom-4 left-4 z-40 lg:hidden shadow-lg"
+-      >
+-        <Menu className="h-5 w-5" />
+-      </Button>
++      {/* Mobile trigger. Hidden while the drawer is open so it does not sit
++          on top of the drawer it just opened. */}
++      {!open && (
++        <Button
++          variant="outline"
++          size="icon"
++          onClick={() => setOpen(true)}
++          className="fixed bottom-4 left-4 z-40 shadow-lg lg:hidden"
++          aria-label="Open navigation menu"
++          aria-expanded={false}
++        >
++          <Menu className="h-5 w-5" aria-hidden="true" />
++        </Button>
++      )}
+     </>
+   );
+ }
+-
+-export function AdminMobileMenuTrigger({
+-  onClick
+-}: {
+-  onClick: () => void;
+-}) {
+-  return (
+-    <Button
+-      variant="ghost"
+-      size="icon"
+-      onClick={onClick}
+-      className="lg:hidden"
+-    >
+-      <Menu className="h-5 w-5" />
+-    </Button>
+-  );
+-}
+diff --git a/src/components/admin/topbar.tsx b/src/components/admin/topbar.tsx
+--- a/src/components/admin/topbar.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/components/admin/topbar.tsx	2026-08-30 13:55:08.262218567 +0000
+@@ -29,10 +29,17 @@
+     <header className="glass-panel sticky top-0 z-30 flex h-16 items-center gap-4 border-b px-4 sm:px-6">
+       {/* Search */}
+       <div className="relative hidden flex-1 max-w-md md:block">
+-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
++        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
++        {/* TODO(search): not wired to anything yet — no handler, no endpoint.
++            Kept because staff know it is coming; do not ship an equivalent
++            on the client portal, where a dead control reads as a broken
++            product. */}
+         <Input
+           placeholder="Search anything..."
+-          className="pl-9 bg-muted/50 border-0 focus-visible:ring-1"
++          aria-label="Search"
++          disabled
++          title="Search is not available yet"
++          className="border-0 bg-muted/50 pl-9 focus-visible:ring-1"
+         />
+       </div>
+ 
+@@ -41,14 +48,11 @@
+         {/* Notifications */}
+         <DropdownMenu>
+           <DropdownMenuTrigger asChild>
+-            <Button
+-              variant="ghost"
+-              size="icon"
+-              className="relative"
+-              aria-label="Notifications"
+-            >
+-              <Bell className="h-5 w-5" />
+-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-ochre-500 ring-2 ring-background" />
++            <Button variant="ghost" size="icon" aria-label="Notifications">
++              <Bell className="h-5 w-5" aria-hidden="true" />
++              {/* The unread dot was hardcoded on, directly above a menu
++                  reading "No new notifications". Restore it only when it is
++                  driven by a real count from the Notification model. */}
+             </Button>
+           </DropdownMenuTrigger>
+           <DropdownMenuContent align="end" className="w-80">
+diff --git a/src/components/client/shell-context.tsx b/src/components/client/shell-context.tsx
+--- a/src/components/client/shell-context.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/client/shell-context.tsx	2026-08-30 13:55:08.233363176 +0000
+@@ -0,0 +1,91 @@
++"use client";
++
++import * as React from "react";
++
++/**
++ * Shared state for the client portal's mobile navigation drawer.
++ *
++ * Why this exists
++ * ───────────────
++ * `ClientSidebar` and `ClientTopbar` are siblings — the layout renders the
++ * sidebar, then the topbar next to it. Each one previously held its own
++ * `useState(false)` for the drawer:
++ *
++ *   • The topbar rendered the hamburger and called *its own* `setOpen(true)`.
++ *     Nothing read that value. It was write-only state.
++ *   • The sidebar read *its own* `open` to decide whether to translate into
++ *     view. Nothing ever set it to `true`.
++ *
++ * The result was that on any viewport below `lg`, a signed-in client could
++ * not open the portal navigation at all: Documents, Messages, Appointments,
++ * Payments and Profile were unreachable, and so was the sidebar's Sign out.
++ * The button appeared to work — it had a pressed state — which is why it
++ * survived review.
++ *
++ * The state now lives above both of them. The admin sidebar does not need
++ * this because it renders its own trigger, so its state never had to cross a
++ * component boundary.
++ */
++
++type ClientShellState = {
++  navOpen: boolean;
++  openNav: () => void;
++  closeNav: () => void;
++};
++
++const ClientShellContext = React.createContext<ClientShellState | null>(null);
++
++export function ClientShellProvider({
++  children
++}: {
++  children: React.ReactNode;
++}) {
++  const [navOpen, setNavOpen] = React.useState(false);
++
++  const openNav = React.useCallback(() => setNavOpen(true), []);
++  const closeNav = React.useCallback(() => setNavOpen(false), []);
++
++  /* Escape closes the drawer. Expected of any overlay, and the only exit for
++     a keyboard user once focus is inside it. */
++  React.useEffect(() => {
++    if (!navOpen) return;
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key === "Escape") setNavOpen(false);
++    };
++    window.addEventListener("keydown", onKey);
++    return () => window.removeEventListener("keydown", onKey);
++  }, [navOpen]);
++
++  /* Stop the page behind the drawer from scrolling. Without this, dragging
++     on the overlay scrolls the dashboard underneath — which reads as the
++     drawer being broken. */
++  React.useEffect(() => {
++    if (!navOpen) return;
++    const previous = document.body.style.overflow;
++    document.body.style.overflow = "hidden";
++    return () => {
++      document.body.style.overflow = previous;
++    };
++  }, [navOpen]);
++
++  const value = React.useMemo(
++    () => ({ navOpen, openNav, closeNav }),
++    [navOpen, openNav, closeNav]
++  );
++
++  return (
++    <ClientShellContext.Provider value={value}>
++      {children}
++    </ClientShellContext.Provider>
++  );
++}
++
++export function useClientShell(): ClientShellState {
++  const ctx = React.useContext(ClientShellContext);
++  if (!ctx) {
++    throw new Error(
++      "useClientShell must be used inside <ClientShellProvider>. The provider lives in src/app/client/(dashboard)/layout.tsx."
++    );
++  }
++  return ctx;
++}
+diff --git a/src/components/client/sidebar.tsx b/src/components/client/sidebar.tsx
+--- a/src/components/client/sidebar.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/components/client/sidebar.tsx	2026-08-30 13:55:08.254315321 +0000
+@@ -13,10 +13,12 @@
+   User,
+   LogOut,
+   ShieldCheck,
++  Menu,
+   X
+ } from "lucide-react";
+ import { cn } from "@/lib/utils";
+ import { signOut } from "next-auth/react";
++import { useClientShell } from "@/components/client/shell-context";
+ 
+ const NAV = [
+   { href: "/client", label: "Dashboard", icon: LayoutDashboard, exact: true },
+@@ -30,21 +32,26 @@
+ 
+ export function ClientSidebar() {
+   const pathname = usePathname();
+-  const [open, setOpen] = React.useState(false);
++  const { navOpen, closeNav } = useClientShell();
+ 
+   return (
+     <>
+-      {open && (
++      {navOpen && (
+         <button
+-          aria-label="Close menu"
+-          onClick={() => setOpen(false)}
++          type="button"
++          aria-label="Close navigation menu"
++          onClick={closeNav}
+           className="fixed inset-0 z-40 bg-ink-950/40 backdrop-blur-sm lg:hidden"
+         />
+       )}
+       <aside
++        aria-label="Client portal navigation"
++        /* Hidden from assistive tech while off-screen, or a screen reader
++           reads a menu the user cannot see and cannot reach. */
++        aria-hidden={navOpen ? undefined : "true"}
+         className={cn(
+           "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border/60 bg-card transition-transform duration-300 lg:static lg:translate-x-0",
+-          open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
++          navOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+         )}
+       >
+         <div className="flex h-16 items-center justify-between border-b border-border/60 px-5">
+@@ -62,11 +69,12 @@
+             </div>
+           </Link>
+           <button
+-            onClick={() => setOpen(false)}
++            type="button"
++            onClick={closeNav}
+             className="rounded-md p-1.5 lg:hidden"
+-            aria-label="Close"
++            aria-label="Close navigation menu"
+           >
+-            <X className="h-4 w-4" />
++            <X className="h-4 w-4" aria-hidden="true" />
+           </button>
+         </div>
+ 
+@@ -84,15 +92,16 @@
+                 <li key={item.href}>
+                   <Link
+                     href={item.href}
++                    aria-current={active ? "page" : undefined}
+                     className={cn(
+-                      "group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
++                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                       active
+                         ? "bg-primary text-primary-foreground shadow-soft"
+                         : "text-foreground/80 hover:bg-secondary"
+                     )}
+-                    onClick={() => setOpen(false)}
++                    onClick={closeNav}
+                   >
+-                    <Icon className="h-4 w-4" />
++                    <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                     {item.label}
+                   </Link>
+                 </li>
+@@ -103,10 +112,11 @@
+ 
+         <div className="border-t border-border/60 p-3">
+           <button
++            type="button"
+             onClick={() => signOut({ callbackUrl: "/" })}
+             className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:bg-secondary"
+           >
+-            <LogOut className="h-4 w-4" />
++            <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+             Sign out
+           </button>
+         </div>
+@@ -115,27 +125,18 @@
+   );
+ }
+ 
+-export function ClientMobileMenuTrigger({ onClick }: { onClick: () => void }) {
++export function ClientMobileMenuTrigger() {
++  const { navOpen, openNav, closeNav } = useClientShell();
++
+   return (
+     <button
+-      onClick={onClick}
++      type="button"
++      onClick={navOpen ? closeNav : openNav}
+       className="rounded-md border border-border/60 p-2 lg:hidden"
+-      aria-label="Open menu"
++      aria-label={navOpen ? "Close navigation menu" : "Open navigation menu"}
++      aria-expanded={navOpen}
+     >
+-      <svg
+-        xmlns="http://www.w3.org/2000/svg"
+-        fill="none"
+-        viewBox="0 0 24 24"
+-        strokeWidth={1.5}
+-        stroke="currentColor"
+-        className="h-5 w-5"
+-      >
+-        <path
+-          strokeLinecap="round"
+-          strokeLinejoin="round"
+-          d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+-        />
+-      </svg>
++      <Menu className="h-5 w-5" aria-hidden="true" />
+     </button>
+   );
+ }
+\ No newline at end of file
+diff --git a/src/components/client/topbar.tsx b/src/components/client/topbar.tsx
+--- a/src/components/client/topbar.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/components/client/topbar.tsx	2026-08-30 13:55:08.256867700 +0000
+@@ -1,12 +1,46 @@
+ "use client";
+ 
+ import * as React from "react";
+-import { Bell, Search, ChevronDown } from "lucide-react";
++import Link from "next/link";
++import { Bell, ChevronDown, User, LogOut } from "lucide-react";
++import { signOut } from "next-auth/react";
+ import { Button } from "@/components/ui/button";
+-import { Input } from "@/components/ui/input";
++import {
++  DropdownMenu,
++  DropdownMenuContent,
++  DropdownMenuItem,
++  DropdownMenuLabel,
++  DropdownMenuSeparator,
++  DropdownMenuTrigger
++} from "@/components/ui/dropdown-menu";
+ import { initials } from "@/lib/utils";
+ import { ClientMobileMenuTrigger } from "@/components/client/sidebar";
+ 
++/**
++ * Client portal topbar.
++ *
++ * Three things were fixed here:
++ *
++ * 1. The hamburger called a `setOpen` that belonged to this component. The
++ *    sidebar it was meant to open read a different `useState` entirely, so
++ *    the portal navigation was unreachable on mobile. The trigger now reads
++ *    the shared shell state — see components/client/shell-context.tsx.
++ *
++ * 2. The bell carried a permanent unread dot with nothing behind it. An
++ *    indicator that always says "you have something" trains people to
++ *    ignore it, which is worse than having no indicator. It is now a real
++ *    menu, and the dot is gone until there is something to count.
++ *
++ * 3. The user chip was a `div` with a chevron on it. The chevron promises a
++ *    menu, so tapping it and getting nothing reads as a broken control.
++ *    It is now an actual menu — which also puts Sign out within reach on a
++ *    phone, where it previously lived only in the unreachable sidebar.
++ *
++ * The search field is deliberately left out. It was a non-functional input
++ * promising "Search applications, documents, invoices…" — see the handover
++ * note; wiring it needs a search endpoint that does not exist yet, and a box
++ * that silently does nothing is worse than no box.
++ */
+ export function ClientTopbar({
+   userName,
+   userEmail
+@@ -14,38 +48,79 @@
+   userName: string;
+   userEmail: string;
+ }) {
+-  const [open, setOpen] = React.useState(false);
+   return (
+     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/85 px-4 backdrop-blur-xl sm:px-8">
+-      <ClientMobileMenuTrigger onClick={() => setOpen(true)} />
+-      <div className="relative hidden max-w-sm flex-1 md:block">
+-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+-        <Input
+-          placeholder="Search applications, documents, invoices…"
+-          className="pl-9"
+-        />
+-      </div>
++      <ClientMobileMenuTrigger />
++
++      <Link
++        href="/client"
++        className="font-display text-sm text-foreground/90 md:hidden"
++      >
++        Client portal
++      </Link>
++
+       <div className="ml-auto flex items-center gap-2">
+-        <Button
+-          variant="ghost"
+-          size="icon"
+-          aria-label="Notifications"
+-          className="relative"
+-        >
+-          <Bell className="h-4 w-4" />
+-          <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-ochre-500" />
+-        </Button>
+-        <div className="flex items-center gap-3 rounded-full border border-border/60 bg-card px-2 py-1.5 pr-3">
+-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-gold-300 to-gold-600 text-xs font-semibold text-ink-900">
+-            {initials(userName)}
+-          </span>
+-          <div className="hidden text-left leading-tight sm:block">
+-            <div className="text-xs font-medium">{userName}</div>
+-            <div className="text-[10px] text-muted-foreground">{userEmail}</div>
+-          </div>
+-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+-        </div>
++        <DropdownMenu>
++          <DropdownMenuTrigger asChild>
++            <Button variant="ghost" size="icon" aria-label="Notifications">
++              <Bell className="h-4 w-4" aria-hidden="true" />
++            </Button>
++          </DropdownMenuTrigger>
++          <DropdownMenuContent align="end" className="w-72">
++            <DropdownMenuLabel>Notifications</DropdownMenuLabel>
++            <DropdownMenuSeparator />
++            <div className="p-4 text-center text-sm text-muted-foreground">
++              Nothing new. Updates to your case appear here.
++            </div>
++          </DropdownMenuContent>
++        </DropdownMenu>
++
++        <DropdownMenu>
++          <DropdownMenuTrigger asChild>
++            <Button
++              variant="ghost"
++              className="h-auto gap-3 rounded-full border border-border/60 bg-card py-1.5 pl-2 pr-3"
++            >
++              <span
++                aria-hidden="true"
++                className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-gold-300 to-gold-600 text-xs font-semibold text-ink-900"
++              >
++                {initials(userName)}
++              </span>
++              <span className="hidden text-left leading-tight sm:block">
++                <span className="block text-xs font-medium">{userName}</span>
++                <span className="block text-[10px] font-normal text-muted-foreground">
++                  {userEmail}
++                </span>
++              </span>
++              <ChevronDown
++                className="h-3.5 w-3.5 text-muted-foreground"
++                aria-hidden="true"
++              />
++            </Button>
++          </DropdownMenuTrigger>
++          <DropdownMenuContent align="end" className="w-56">
++            <DropdownMenuLabel>
++              <span className="block text-sm font-medium">{userName}</span>
++              <span className="mt-0.5 block break-anywhere text-xs font-normal text-muted-foreground">
++                {userEmail}
++              </span>
++            </DropdownMenuLabel>
++            <DropdownMenuSeparator />
++            <DropdownMenuItem asChild>
++              <Link href="/client/profile">
++                <User className="mr-2 h-4 w-4" aria-hidden="true" />
++                Profile
++              </Link>
++            </DropdownMenuItem>
++            <DropdownMenuSeparator />
++            <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/" })}>
++              <LogOut className="mr-2 h-4 w-4" aria-hidden="true" />
++              Sign out
++            </DropdownMenuItem>
++          </DropdownMenuContent>
++        </DropdownMenu>
+       </div>
+     </header>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/src/components/home/sections.tsx b/src/components/home/sections.tsx
+--- a/src/components/home/sections.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/components/home/sections.tsx	2026-08-30 13:55:08.251759954 +0000
+@@ -10,7 +10,12 @@
+   SERVICES,
+   ORIGIN_HUBS
+ } from "@/lib/constants";
+-import { DEMO_UPDATES, DEMO_POSTS, DEMO_STORIES } from "@/lib/content";
++import {
++  DEMO_UPDATES,
++  DEMO_POSTS,
++  DEMO_STORIES,
++  IS_DEMO_CONTENT
++} from "@/lib/content";
+ 
+ /* ─────────────────────────── trust band ───────────────────────────── */
+ 
+@@ -251,8 +256,16 @@
+   return (
+     <Section
+       eyebrow="Success stories"
+-      title="Real applications, real results"
+-      lede="Published with client permission. Names are shortened and identifying details removed."
++      title={
++        IS_DEMO_CONTENT
++          ? "Success stories"
++          : "Real applications, real results"
++      }
++      lede={
++        IS_DEMO_CONTENT
++          ? "Layout placeholders — not real clients. Replace from the Reviews CMS before launch."
++          : "Published with client permission. Names are shortened and identifying details removed."
++      }
+       action={
+         <Link
+           href="/success-stories"
+@@ -269,7 +282,11 @@
+             key={i}
+             className="surface flex flex-col p-5"
+           >
+-            <StatusPill tone="verified" label="Approved" />
++            {IS_DEMO_CONTENT ? (
++              <StatusPill tone="idle" label="Placeholder" />
++            ) : (
++              <StatusPill tone="verified" label="Approved" />
++            )}
+             <blockquote className="mt-4 text-pretty text-[15px] leading-relaxed">
+               {s.quote}
+             </blockquote>
+@@ -282,6 +299,14 @@
+           </figure>
+         ))}
+       </div>
++      {IS_DEMO_CONTENT && (
++        <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
++          The entries above are placeholder records used to build this layout.
++          They are not real client reviews. Trust Gate Overseas does not
++          fabricate testimonials — every published statement is a real
++          client&rsquo;s words, shared with their consent.
++        </p>
++      )}
+     </Section>
+   );
+ }
+@@ -302,7 +327,11 @@
+     <Section
+       eyebrow="Visa & immigration updates"
+       title="What changed, and when we checked it"
+-      lede="Each update links the official government source and shows the date we last verified it."
++      lede={
++        IS_DEMO_CONTENT
++          ? "Placeholder entries. Verification dates below are not real checks — replace from the Immigration Updates CMS before launch."
++          : "Each update links the official government source and shows the date we last verified it."
++      }
+       action={
+         <Link
+           href="/immigration-updates"
+@@ -321,12 +350,15 @@
+                 {u.destination}
+               </span>
+               <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+-                Verified {u.lastVerifiedAt}
++                {IS_DEMO_CONTENT
++                  ? "Placeholder entry"
++                  : `Verified ${u.lastVerifiedAt}`}
+               </span>
+             </div>
+-            <h3 className="mt-2 text-lg leading-snug">
+-              <Link href={`/immigration-updates/${u.slug}`}>{u.title}</Link>
+-            </h3>
++            {/* No /immigration-updates/[slug] route exists, so this was a
++                404 on every headline. Plain heading until the detail route
++                is built — same call the index page already made. */}
++            <h3 className="mt-2 text-lg leading-snug">{u.title}</h3>
+             <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-muted-foreground">
+               {u.summary}
+             </p>
+@@ -366,13 +398,13 @@
+         </Link>
+       }
+     >
++      {/* Post detail pages are not built yet: there is no /blog/[slug] route,
++          so each of these cards was a 404 while the lift-on-hover and the
++          corner arrow both promised otherwise. Plain articles until the
++          detail route exists — restore the Link and the arrow together. */}
+       <div className="grid gap-4 md:grid-cols-3">
+         {posts.map((p) => (
+-          <Link
+-            key={p.slug}
+-            href={`/blog/${p.slug}`}
+-            className="surface-interactive group flex flex-col p-5"
+-          >
++          <article key={p.slug} className="surface flex flex-col p-5">
+             <div className="flex items-center gap-3">
+               <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-accent-ink">
+                 {p.category}
+@@ -385,11 +417,7 @@
+             <p className="mt-2 flex-1 text-[13px] leading-relaxed text-muted-foreground">
+               {p.excerpt}
+             </p>
+-            <span className="mt-4 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.13em] text-accent-ink">
+-              Read
+-              <ArrowUpRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+-            </span>
+-          </Link>
++          </article>
+         ))}
+       </div>
+     </Section>
+diff --git a/src/components/layout/footer.tsx b/src/components/layout/footer.tsx
+--- a/src/components/layout/footer.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/components/layout/footer.tsx	2026-08-30 13:55:08.249216006 +0000
+@@ -22,7 +22,7 @@
+ 
+       <div className="container-edge py-16 lg:py-20">
+         <div className="grid gap-10 lg:grid-cols-12">
+-          <div className="lg:col-span-5">
++          <div className="lg:col-span-6">
+             <Link href="/" className="inline-block">
+               <Image
+                 src="/logo.webp"
+@@ -39,19 +39,19 @@
+             {/* Office Locations */}
+             <div className="mt-6 space-y-3">
+               <div className="flex items-start gap-3 text-sm">
+-                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" />
++                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" aria-hidden="true" />
+                 <div>
+-                  <div className="font-medium text-ink-100">India Office</div>
++                  <div className="font-medium text-ink-100">India office</div>
+                   <div className="text-xs text-ink-300">Appointment basis only</div>
+-                  <div className="text-xs text-ink-300">Mon - Sat: 9:00 AM - 6:00 PM IST</div>
++                  <div className="text-xs text-ink-300">{siteConfig.hours.weekdays}</div>
+                 </div>
+               </div>
+               <div className="flex items-start gap-3 text-sm">
+-                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" />
++                <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" aria-hidden="true" />
+                 <div>
+-                  <div className="font-medium text-ink-100">London Office</div>
++                  <div className="font-medium text-ink-100">London office</div>
+                   <div className="text-xs text-ink-300">Appointment basis only</div>
+-                  <div className="text-xs text-ink-300">Mon - Sat: 9:00 AM - 6:00 PM GMT</div>
++                  <div className="text-xs text-ink-300">{siteConfig.hours.weekdays}</div>
+                 </div>
+               </div>
+             </div>
+@@ -62,14 +62,14 @@
+                 href={`mailto:${siteConfig.email}`}
+                 className="flex items-center gap-3 text-ink-200 transition hover:text-white"
+               >
+-                <Mail className="h-4 w-4 text-gold-300" />
++                <Mail className="h-4 w-4 shrink-0 text-gold-300" aria-hidden="true" />
+                 {siteConfig.email}
+               </a>
+               <a
+                 href={`tel:${siteConfig.phone.replace(/\s/g, "")}`}
+                 className="flex items-center gap-3 text-ink-200 transition hover:text-white"
+               >
+-                <Phone className="h-4 w-4 text-gold-300" />
++                <Phone className="h-4 w-4 shrink-0 text-gold-300" aria-hidden="true" />
+                 {siteConfig.phone}
+               </a>
+             </div>
+@@ -77,20 +77,20 @@
+             {/* Social Links */}
+             <div className="mt-6 flex items-center gap-3">
+               {[
+-                { Icon: Linkedin, href: siteConfig.social.linkedin },
+-                { Icon: Instagram, href: siteConfig.social.instagram },
+-                { Icon: Facebook, href: siteConfig.social.facebook },
+-                { Icon: Youtube, href: siteConfig.social.youtube }
+-              ].map(({ Icon, href }, i) => (
++                { Icon: Linkedin, href: siteConfig.social.linkedin, name: "LinkedIn" },
++                { Icon: Instagram, href: siteConfig.social.instagram, name: "Instagram" },
++                { Icon: Facebook, href: siteConfig.social.facebook, name: "Facebook" },
++                { Icon: Youtube, href: siteConfig.social.youtube, name: "YouTube" }
++              ].map(({ Icon, href, name }) => (
+                 <a
+-                  key={i}
++                  key={name}
+                   href={href}
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   className="flex h-9 w-9 items-center justify-center rounded-md border border-white/15 text-ink-200 transition hover:border-gold-300 hover:text-gold-300"
+-                  aria-label="Social link"
++                  aria-label={`${siteConfig.name} on ${name}`}
+                 >
+-                  <Icon className="h-4 w-4" />
++                  <Icon className="h-4 w-4" aria-hidden="true" />
+                 </a>
+               ))}
+             </div>
+diff --git a/src/components/layout/nav.tsx b/src/components/layout/nav.tsx
+--- a/src/components/layout/nav.tsx	2026-08-24 15:03:08.000000000 +0000
++++ b/src/components/layout/nav.tsx	2026-08-30 13:55:08.246577593 +0000
+@@ -65,6 +65,16 @@
+     setActiveMenu(null);
+   }, [pathname]);
+ 
++  React.useEffect(() => {
++    const onKey = (e: KeyboardEvent) => {
++      if (e.key !== "Escape") return;
++      setActiveMenu(null);
++      setOpen(false);
++    };
++    window.addEventListener("keydown", onKey);
++    return () => window.removeEventListener("keydown", onKey);
++  }, []);
++
+   return (
+     <header
+       className={cn(
+@@ -106,8 +116,15 @@
+                 onMouseLeave={() => setActiveMenu(null)}
+               >
+                 <button
++                  type="button"
++                  aria-expanded={activeMenu === item.label}
++                  aria-haspopup="true"
++                  onClick={() =>
++                    setActiveMenu((m) => (m === item.label ? null : item.label))
++                  }
++                  onFocus={() => setActiveMenu(item.label)}
+                   className={cn(
+-                    "group flex h-10 items-center gap-1 rounded-md px-3 text-sm font-medium text-foreground/80 transition-colors hover:text-foreground",
++                    "flex h-10 items-center gap-1 rounded-md px-3 text-sm font-medium text-foreground/80 transition-colors hover:text-foreground",
+                     activeMenu === item.label && "text-foreground"
+                   )}
+                 >
+@@ -133,7 +150,7 @@
+                           <Link
+                             key={child.href}
+                             href={child.href}
+-                            className="flex items-start justify-between gap-4 rounded-lg p-3 transition-colors hover:bg-secondary"
++                            className="group/item flex items-start justify-between gap-4 rounded-lg p-3 transition-colors hover:bg-secondary"
+                           >
+                             <div>
+                               <div className="text-sm font-medium">
+@@ -145,7 +162,7 @@
+                                 </div>
+                               )}
+                             </div>
+-                            <ArrowUpRight className="mt-1 h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
++                            <ArrowUpRight className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/item:opacity-100 group-focus-visible/item:opacity-100" />
+                           </Link>
+                         ))}
+                       </div>
+@@ -184,7 +201,9 @@
+           <button
+             onClick={() => setOpen((o) => !o)}
+             className="ml-1 inline-flex h-10 w-10 items-center justify-center rounded-md border border-border/60 text-foreground/80 lg:hidden"
+-            aria-label="Toggle menu"
++            aria-label={open ? "Close menu" : "Open menu"}
++            aria-expanded={open}
++            aria-controls="mobile-nav"
+           >
+             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+           </button>
+@@ -198,6 +217,7 @@
+             animate={{ height: "auto", opacity: 1 }}
+             exit={reduce ? undefined : { height: 0, opacity: 0 }}
+             transition={{ duration: reduce ? 0 : 0.3 }}
++            id="mobile-nav"
+             className="overflow-hidden border-t border-border/60 bg-background lg:hidden"
+           >
+             <div className="container-edge space-y-1 py-4">
+diff --git a/src/lib/eligibility.ts b/src/lib/eligibility.ts
+--- a/src/lib/eligibility.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/eligibility.ts	2026-08-30 13:55:08.230807738 +0000
+@@ -0,0 +1,635 @@
++/**
++ * Trust Gate Overseas — eligibility triage engine.
++ *
++ * ─────────────────────────────────────────────────────────────
++ * WHAT THIS IS, AND WHAT IT IS DELIBERATELY NOT
++ * ─────────────────────────────────────────────────────────────
++ * This module decides ONE thing: whether an enquiry is work Trust Gate
++ * can take, and what the client should do next. It is a routing and
++ * intake tool.
++ *
++ * It does NOT assess anyone against an immigration rule, and it must
++ * never be extended to do so. Nothing in this file states a financial
++ * threshold, a processing time, a refusal cooling-off period, an
++ * approval rate, or any other rule-derived figure — those change without
++ * notice, they differ by nationality and post, and getting one wrong in
++ * a client's favour is how a consultancy ends up in front of a
++ * regulator.
++ *
++ * Every substantive statement produced here comes from one of three
++ * places, all of them safe:
++ *   1. The firm's own published service catalogue (`src/lib/constants.ts`),
++ *      which the business already stands behind on the public site.
++ *   2. Process and logistics observations that are true regardless of
++ *      the rules (appointment slots are finite; documents take time to
++ *      gather; undisclosed refusals cause more damage than disclosed ones).
++ *   3. The client's own answers, reflected back.
++ *
++ * ─────────────────────────────────────────────────────────────
++ * DESIGN PRINCIPLE: NO DEAD ENDS
++ * ─────────────────────────────────────────────────────────────
++ * The previous version returned OUT_OF_SCOPE — a flat "probably not one
++ * for us" — in two cases that were both wrong:
++ *
++ *   a) purpose === "other", even though that option is labelled "Other
++ *      short-stay purpose", which is precisely this firm's practice area.
++ *   b) any origin/destination pair without a published service, which
++ *      rejected every India-based enquiry for Australia, New Zealand,
++ *      Canada, the USA and Turkey outright.
++ *
++ * A visitor-visa enquiry is now never rejected by a form. Where the firm
++ * does not run a published desk for a pair, the engine says so honestly
++ * and routes to a conversation rather than closing the door. Where the
++ * enquiry is genuinely outside visitor and tourist work — study, work,
++ * settlement — it refers out plainly, because taking that enquiry would
++ * be worse for everyone.
++ *
++ * Being solution-oriented means finding the client a route. It does not
++ * mean telling them what they want to hear.
++ */
++
++import {
++  SERVICES,
++  ORIGIN_HUBS,
++  DESTINATIONS,
++  type Service
++} from "@/lib/constants";
++
++/* ───────────────────────── Questions ───────────────────────── */
++
++export type Step = {
++  id: AnswerKey;
++  question: string;
++  help?: string;
++  type: "select" | "radio";
++  options: { value: string; label: string; hint?: string }[];
++};
++
++export type AnswerKey =
++  | "hub"
++  | "destination"
++  | "purpose"
++  | "dates"
++  | "funding"
++  | "history"
++  | "refusal";
++
++export type Answers = Partial<Record<AnswerKey, string>>;
++
++/** Destination options, derived from the published catalogue so the form
++ *  can never offer a destination the site does not otherwise mention. */
++const DESTINATION_OPTIONS = (() => {
++  const seen = new Map<string, { value: string; label: string; hint?: string }>();
++  for (const d of DESTINATIONS) {
++    seen.set(d.code, {
++      value: d.code,
++      label: `${d.flag}  ${d.name}`,
++      hint: d.stayNote
++    });
++  }
++  return Array.from(seen.values());
++})();
++
++export const STEPS: Step[] = [
++  {
++    id: "hub",
++    question: "Where are you applying from?",
++    help: "This is where you live and where you would lodge the application — not your nationality.",
++    type: "radio",
++    options: ORIGIN_HUBS.map((h) => ({
++      value: h.slug,
++      label: `${h.flag}  ${h.name}`,
++      hint: h.blurb
++    }))
++  },
++  {
++    id: "destination",
++    question: "Where are you travelling to?",
++    help: "Pick your main destination. If you are visiting several countries on one trip, choose the one you will spend the most time in.",
++    type: "select",
++    options: DESTINATION_OPTIONS
++  },
++  {
++    id: "purpose",
++    question: "What is the purpose of your trip?",
++    help: "We work on visitor and tourist visas. Knowing the purpose tells us straight away whether this is ours to handle.",
++    type: "radio",
++    options: [
++      { value: "tourism", label: "Tourism or a holiday" },
++      { value: "family", label: "Visiting family or friends" },
++      { value: "business-short", label: "A short business visit" },
++      {
++        value: "other-short",
++        label: "Another short visit",
++        hint: "A wedding, a conference, medical treatment, a short course"
++      },
++      {
++        value: "long-stay",
++        label: "Studying, working or moving permanently",
++        hint: "We will point you to the right kind of firm"
++      }
++    ]
++  },
++  {
++    id: "dates",
++    question: "How firm are your travel dates?",
++    help: "Appointment availability is often the real constraint, not the decision itself. The earlier we know, the more room we have.",
++    type: "radio",
++    options: [
++      { value: "booked", label: "Booked, or about to book" },
++      { value: "planned", label: "Planned — more than six weeks away" },
++      { value: "soon", label: "Travelling within three weeks" },
++      { value: "flexible", label: "Flexible — still exploring" }
++    ]
++  },
++  {
++    id: "funding",
++    question: "Who is paying for the trip?",
++    help: "There is no better or worse answer here. It only changes whose documents we need.",
++    type: "radio",
++    options: [
++      { value: "self", label: "Me, from my own funds" },
++      { value: "sponsor", label: "A host, family member or friend" },
++      { value: "employer", label: "My employer" },
++      { value: "unsure", label: "Not settled yet" }
++    ]
++  },
++  {
++    id: "history",
++    question: "Have you travelled internationally in the last five years?",
++    type: "radio",
++    options: [
++      { value: "yes-similar", label: "Yes — to comparable destinations" },
++      { value: "yes-other", label: "Yes — elsewhere" },
++      { value: "no", label: "No, this would be my first trip" }
++    ]
++  },
++  {
++    id: "refusal",
++    question: "Have you ever been refused a visa, or refused entry?",
++    help: "A previous refusal is not fatal. Concealing one is far more damaging.",
++    type: "radio",
++    options: [
++      { value: "no", label: "No" },
++      { value: "yes", label: "Yes" },
++      { value: "unsure", label: "I am not sure" }
++    ]
++  }
++];
++
++/* ───────────────────────── Result shape ───────────────────────── */
++
++export type OutcomeCode =
++  /** Published desk for this pair, and nothing in the answers needs unusual handling. */
++  | "ROUTE_MATCHED"
++  /** Published desk for this pair, with points that need building properly. */
++  | "ROUTE_MATCHED_WITH_CARE"
++  /** Visitor work, but no published desk for this exact pair. Honest, not a rejection. */
++  | "ROUTE_UNPUBLISHED"
++  /** Outside visitor and tourist work entirely. Referred out. */
++  | "SCOPE_REFERRAL";
++
++export type Finding = {
++  /** Short, scannable. Sentence case, no trailing period. */
++  title: string;
++  /** One or two sentences. For watch points, this says what to do about it. */
++  detail: string;
++};
++
++export type ServiceLink = {
++  slug: string;
++  name: string;
++  href: string;
++  /** Why this one is being shown — only set for alternatives. */
++  reason?: string;
++};
++
++export type Assessment = {
++  outcome: OutcomeCode;
++  /** The one-line verdict. Never a bare rejection. */
++  headline: string;
++  /** Two or three sentences expanding on the headline. */
++  summary: string;
++  /** What is already working in this enquiry's favour. */
++  strengths: Finding[];
++  /** What needs attention — each one carries the fix, not just the flag. */
++  watchPoints: Finding[];
++  /** Concrete actions, in order. Always at least one. */
++  nextSteps: string[];
++  /** The service we would run this under, where one exists. */
++  primaryService: ServiceLink | null;
++  /** Other routes worth showing. Empty when the primary is a clean match. */
++  alternatives: ServiceLink[];
++  /** Straight from the matched service's published catalogue entry. */
++  documents: string[];
++  considerations: string[];
++  officialSource: { name: string; url: string } | null;
++  /** Machine-readable trail, stored on EligibilityResult.matchedRules. */
++  flags: string[];
++};
++
++/* ───────────────────────── Helpers ───────────────────────── */
++
++const href = (s: Service): ServiceLink => ({
++  slug: s.slug,
++  name: s.name,
++  href: `/services/${s.slug}`
++});
++
++function hubName(hub?: string) {
++  return ORIGIN_HUBS.find((h) => h.slug === hub)?.name ?? "your location";
++}
++
++function destinationName(code?: string) {
++  return DESTINATIONS.find((d) => d.code === code)?.name ?? "your destination";
++}
++
++/** The published service for an exact origin → destination pair, if any. */
++function exactService(hub?: string, destination?: string) {
++  return SERVICES.find(
++    (s) => s.published && s.hub === hub && s.destinationCode === destination
++  );
++}
++
++/**
++ * The catch-all desk for a hub, where the firm runs one.
++ *
++ * The UK hub publishes a "Worldwide" service, which genuinely does cover
++ * destinations without a dedicated desk — that is what it is for. The
++ * India hub does not publish one, so no catch-all is invented for it.
++ */
++function catchAllService(hub?: string) {
++  return SERVICES.find(
++    (s) => s.published && s.hub === hub && s.destinationCode === "WW"
++  );
++}
++
++/** The same destination, handled from the firm's other hub. */
++function sameDestinationOtherHub(hub?: string, destination?: string) {
++  return SERVICES.find(
++    (s) => s.published && s.hub !== hub && s.destinationCode === destination
++  );
++}
++
++/* ───────────────────────── Findings ───────────────────────── */
++
++function collectStrengths(a: Answers): Finding[] {
++  const out: Finding[] = [];
++
++  if (a.history === "yes-similar") {
++    out.push({
++      title: "You have a comparable travel record",
++      detail:
++        "Previous trips to similar destinations, returned from on time, are among the most useful things a visitor file can show. Bring the old passports."
++    });
++  } else if (a.history === "yes-other") {
++    out.push({
++      title: "You have travelled before",
++      detail:
++        "An existing travel record gives us something to build on. We will work out which of those trips are worth putting in front of the decision maker."
++    });
++  }
++
++  if (a.refusal === "no") {
++    out.push({
++      title: "No refusal history to explain",
++      detail:
++        "That keeps the file simple. We can spend the effort on evidence rather than on addressing a previous decision."
++    });
++  }
++
++  if (a.dates === "planned" || a.dates === "flexible") {
++    out.push({
++      title: "You have time on your side",
++      detail:
++        "Starting before dates are locked is the single biggest advantage a visitor applicant can give themselves. It means appointment availability shapes the plan rather than breaking it."
++    });
++  }
++
++  if (a.funding === "self") {
++    out.push({
++      title: "You are funding the trip yourself",
++      detail:
++        "One set of financial documents, one story. That is the most straightforward funding position to evidence."
++    });
++  }
++
++  if (a.funding === "employer") {
++    out.push({
++      title: "Your employer is funding the trip",
++      detail:
++        "Employer-funded travel usually comes with documentation that is already written and already signed — which is a head start."
++    });
++  }
++
++  if (a.purpose === "family" || a.purpose === "tourism") {
++    out.push({
++      title: "A clear, ordinary purpose",
++      detail:
++        "Tourism and family visits are the core of what this practice does. There is nothing unusual to explain about why you are going."
++    });
++  }
++
++  return out;
++}
++
++function collectWatchPoints(a: Answers): Finding[] {
++  const out: Finding[] = [];
++
++  if (a.dates === "soon") {
++    out.push({
++      title: "The timeline is tight",
++      detail:
++        "Travelling within three weeks compresses everything. Appointment slots, not the decision, are usually what runs out first. Tell us your dates on the call and we will say honestly whether it is achievable before you spend anything."
++    });
++  }
++
++  if (a.dates === "booked") {
++    out.push({
++      title: "Travel is already booked",
++      detail:
++        "That fixes the deadline, so we work backwards from it. Have your booking references to hand for the consultation."
++    });
++  }
++
++  if (a.funding === "unsure") {
++    out.push({
++      title: "Funding is not settled yet",
++      detail:
++        "This is worth resolving before anything else, because it decides whose bank statements and letters we need. Deciding it early is usually a few days' work, not a problem."
++    });
++  }
++
++  if (a.funding === "sponsor") {
++    out.push({
++      title: "A third party is funding the trip",
++      detail:
++        "Sponsored trips are completely normal and we handle them constantly. Plan for your host's documents as well as your own — their evidence carries as much weight as yours."
++    });
++  }
++
++  if (a.history === "no") {
++    out.push({
++      title: "This would be your first international trip",
++      detail:
++        "Not a weakness, but it does mean the rest of the file carries more of the load. We will focus on evidencing your circumstances at home rather than a travel record you do not have yet."
++    });
++  }
++
++  if (a.refusal === "yes") {
++    out.push({
++      title: "There is a previous refusal to address",
++      detail:
++        "This is workable, and rebuilding refused files is a large part of what this practice does. Bring the refusal notice itself — the wording of it decides how we approach the new application."
++    });
++  }
++
++  if (a.refusal === "unsure") {
++    out.push({
++      title: "Refusal history needs checking",
++      detail:
++        "Before anything is submitted we need certainty here, because an undisclosed refusal does far more damage than a disclosed one. We will help you establish what is on record."
++    });
++  }
++
++  return out;
++}
++
++/* ───────────────────────── The engine ───────────────────────── */
++
++export function assess(answers: Answers): Assessment {
++  const { hub, destination, purpose } = answers;
++
++  const flags: string[] = [];
++  const strengths = collectStrengths(answers);
++  const watchPoints = collectWatchPoints(answers);
++
++  for (const [k, v] of Object.entries(answers)) {
++    if (v) flags.push(`${k}:${v}`);
++  }
++
++  /* ---- 1. Genuinely outside the practice ------------------------------
++     The only honest rejection in the engine. Study, work and settlement
++     are not visitor visas, this firm does not do them, and pretending
++     otherwise would waste the client's time and money. Even here the
++     result is a direction to go in, not a closed door. */
++  if (purpose === "long-stay") {
++    flags.push("outcome:scope_referral");
++    return {
++      outcome: "SCOPE_REFERRAL",
++      headline: "This one needs a different kind of firm",
++      summary:
++        "Studying, working or settling permanently are long-stay routes, and this practice handles visitor and tourist visas only. We would rather tell you that now than take the enquiry and work it out later.",
++      strengths: [],
++      watchPoints: [],
++      nextSteps: [
++        `Check the official requirements for ${destinationName(destination)} directly with that country's immigration authority, linked from our destination pages.`,
++        "Look for a firm regulated to advise on long-stay and settlement routes in your country — the regulator's own register is the safest place to search.",
++        "If your plans also include a short visit before the move, come back to us. That part we can help with."
++      ],
++      primaryService: null,
++      alternatives: [],
++      documents: [],
++      considerations: [],
++      officialSource:
++        DESTINATIONS.find((d) => d.code === destination)?.source ?? null,
++      flags
++    };
++  }
++
++  const matched = exactService(hub, destination);
++
++  /* ---- 2. No published desk for this exact pair -----------------------
++     Previously an automatic rejection, which closed the door on every
++     India-based enquiry outside Schengen and the UK. It is still an
++     honest "we do not publish this desk" — the catalogue is not extended
++     here — but it routes to a conversation instead of ending the flow. */
++  if (!matched) {
++    const catchAll = catchAllService(hub);
++    const otherHub = sameDestinationOtherHub(hub, destination);
++
++    if (catchAll) {
++      /* The hub runs a worldwide desk, which is exactly the case this
++         service exists for. This is a real match, not a consolation. */
++      flags.push("outcome:route_matched", "route:catch_all");
++      return buildMatched(
++        catchAll,
++        answers,
++        strengths,
++        watchPoints,
++        flags,
++        `${destinationName(destination)} does not have its own page on our site, but it is covered by our worldwide desk — which is what that service is for. We confirm the current requirements against the destination's official source before you pay for anything.`,
++        []
++      );
++    }
++
++    flags.push("outcome:route_unpublished");
++
++    const alternatives: ServiceLink[] = [];
++    if (otherHub) {
++      alternatives.push({
++        ...href(otherHub),
++        reason: `We run this destination from ${hubName(otherHub.hub)}. If you hold status there, this may be your route.`
++      });
++    }
++    for (const s of SERVICES.filter((s) => s.published && s.hub === hub)) {
++      if (alternatives.length >= 3) break;
++      alternatives.push({
++        ...href(s),
++        reason: `A published desk from ${hubName(hub)}.`
++      });
++    }
++
++    /* "Worldwide" is a catch-all rather than a place, so it needs its own
++       phrasing — "a dedicated India to Worldwide desk" is not English. */
++    const routePhrase =
++      destination === "WW"
++        ? `a desk in ${hubName(hub)} for destinations outside our core routes`
++        : `a dedicated ${hubName(hub)} to ${destinationName(destination)} desk`;
++
++    return {
++      outcome: "ROUTE_UNPUBLISHED",
++      headline: "We do not publish this exact route — but do not write it off",
++      summary: `We do not run ${routePhrase}, so we are not going to pretend on a form that we do. What you are describing is still a short-stay visitor application, which is the only thing this practice does. Whether we can take it is a question for a person, not a questionnaire.`,
++      strengths,
++      watchPoints,
++      nextSteps: [
++        "Send us the result below — it takes a minute and it gives the counsellor everything you have already told us.",
++        "We will come back within one business day with a straight answer: either we can take it, or we tell you who is better placed to.",
++        "Either way you will not be charged for finding out."
++      ],
++      primaryService: null,
++      alternatives,
++      documents: [],
++      considerations: [],
++      officialSource:
++        DESTINATIONS.find((d) => d.code === destination)?.source ?? null,
++      flags
++    };
++  }
++
++  /* ---- 3. Published desk for the pair --------------------------------- */
++  const alternatives: ServiceLink[] = [];
++  const catchAll = catchAllService(hub);
++  if (catchAll && catchAll.slug !== matched.slug) {
++    alternatives.push({
++      ...href(catchAll),
++      reason: "If your trip takes in more than one country, this desk covers the rest."
++    });
++  }
++
++  return buildMatched(matched, answers, strengths, watchPoints, flags, null, alternatives);
++}
++
++/* ───────────────────────── Matched-route builder ───────────────────────── */
++
++function buildMatched(
++  service: Service,
++  answers: Answers,
++  strengths: Finding[],
++  watchPoints: Finding[],
++  flags: string[],
++  summaryOverride: string | null,
++  alternatives: ServiceLink[]
++): Assessment {
++  /* "With care" is a statement about how much preparation the file needs,
++     not about how likely it is to succeed. Nothing here predicts an
++     outcome, because nothing here is entitled to. */
++  const needsCare =
++    watchPoints.some((w) =>
++      ["There is a previous refusal to address", "Refusal history needs checking", "The timeline is tight"].includes(
++        w.title
++      )
++    ) || watchPoints.length >= 3;
++
++  const outcome: OutcomeCode = needsCare
++    ? "ROUTE_MATCHED_WITH_CARE"
++    : "ROUTE_MATCHED";
++
++  flags.push(`outcome:${outcome.toLowerCase()}`, `service:${service.slug}`);
++
++  const nextSteps = [
++    "Save your result below so the counsellor has your answers before the call.",
++    "Book a consultation — we confirm which visa actually applies to you and review what you already have.",
++    watchPoints.length
++      ? "Bring the documents flagged above. Those are the ones that shape the plan."
++      : "Start gathering the documents listed below. Nothing on that list is unusual."
++  ];
++
++  return {
++    outcome,
++    headline: needsCare
++      ? "A route we run — with a few things to build properly"
++      : "A route we run",
++    summary:
++      summaryOverride ??
++      (needsCare
++        ? `${service.name} is a desk we run, and everything you have described is workable. There are points below that need proper preparation rather than a form letter — which is the part we are actually for.`
++        : `${service.name} is a desk we run, and nothing in your answers suggests unusual complexity. The next step is a consultation to confirm which visa applies to you and to look at your evidence properly.`),
++    strengths,
++    watchPoints,
++    nextSteps,
++    primaryService: href(service),
++    alternatives,
++    documents: [...service.typicalDocuments],
++    considerations: [...service.considerations],
++    officialSource: service.source,
++    flags
++  };
++}
++
++/* ───────────────────────── Presentation tokens ─────────────────────────
++   Kept beside the engine so an outcome can never be added without its
++   styling.
++
++   These use the `teal` / `gold` ramps rather than the semantic
++   `success` / `warning` tokens deliberately. The semantic tokens are
++   declared as `hsl(var(--success))` with no `<alpha-value>` slot, so
++   Tailwind opacity modifiers (`/10`, `/30`) silently do nothing on them.
++   The ramps are hex, so they work. The resulting colours are the same
++   two the page used before — the visual language is unchanged. */
++
++export const OUTCOME_TONE: Record<
++  OutcomeCode,
++  { label: string; className: string }
++> = {
++  ROUTE_MATCHED: {
++    label: "Within our practice",
++    className: "bg-teal-500/10 text-teal-700 ring-teal-500/30"
++  },
++  ROUTE_MATCHED_WITH_CARE: {
++    label: "Within our practice — needs preparation",
++    className: "bg-gold-500/10 text-gold-800 ring-gold-500/30"
++  },
++  ROUTE_UNPUBLISHED: {
++    label: "Worth a conversation",
++    className: "bg-secondary text-foreground ring-border"
++  },
++  SCOPE_REFERRAL: {
++    label: "Outside our practice",
++    className: "bg-muted text-muted-foreground ring-border"
++  }
++};
++
++/** Outcome codes accepted by the server action and stored on the record. */
++export const OUTCOME_CODES = [
++  "ROUTE_MATCHED",
++  "ROUTE_MATCHED_WITH_CARE",
++  "ROUTE_UNPUBLISHED",
++  "SCOPE_REFERRAL"
++] as const;
++
++/** Human-readable answer labels, for the CRM note. */
++export function describeAnswers(answers: Answers): string {
++  return STEPS.map((s) => {
++    const v = answers[s.id];
++    if (!v) return null;
++    const opt = s.options.find((o) => o.value === v);
++    const label = (opt?.label ?? v).replace(/^[^\w]*\s+/, "");
++    return `${s.question} — ${label}`;
++  })
++    .filter(Boolean)
++    .join("\n");
++}
++
++export { hubName, destinationName };

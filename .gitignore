@@ -1,0 +1,18 @@
+node_modules
+.next
+.env
+.env.local
+.DS_Store
+*.log
+.vercel
+.turbo
+out
+build
+dist
+coverage
+prisma/dev.db
+prisma/dev.db-journal
+storage/uploads
+
+# Private document storage (never commit client documents)
+.uploads/
